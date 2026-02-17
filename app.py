@@ -10,11 +10,18 @@ st.set_page_config(page_title="Visionary SME Analyst", layout="wide", page_icon=
 # Professional UI Styling
 st.markdown("""
     <style>
-    .stMetric {
-        background-color: #ffffff;
-        padding: 20px;
+    /* This targets the container of the metric */
+    [data-testid="stMetric"] {
+        background-color: #1E3A8A; /* Deep Blue background */
+        color: white !important;    /* Force white text */
+        padding: 15px;
         border-radius: 10px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    }
+    
+    /* This ensures the label (title) is also visible */
+    [data-testid="stMetricLabel"] {
+        color: #E2E8F0 !important;
     }
     </style>
     """, unsafe_allow_html=True)  # Fixed parameter name
@@ -76,6 +83,7 @@ if uploaded_file:
                 st.write(advice.text)
 
         st.balloons()
+
 
 
 
