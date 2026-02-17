@@ -21,20 +21,13 @@ def clean_numeric_value(val):
 
 def process_business_file(uploaded_file):
     try:
-        if uploaded_file.name.endswith('.csv'):
-            df = pd.read_csv(uploaded_file)
-        else:
-            df = pd.read_excel(uploaded_file)
-        
-        # Clean numeric-looking columns immediately
+        df = pd.read_csv(uploaded_file) if uploaded_file.name.endswith('.csv') else pd.read_excel(uploaded_file)
         for col in df.columns:
             if any(k in col.lower() for k in ['price', 'cost', 'qty', 'total', 'amount', 'سعر', 'كمية']):
                 df[col] = df[col].apply(clean_numeric_value)
-        
-        # Remove duplicate columns if any (Market entry safety)
         df = df.loc[:, ~df.columns.duplicated()].copy()
         return df
-    except Exception:
+    except:
         return None
 
 def get_header_mapping(columns):
@@ -45,56 +38,52 @@ def get_header_mapping(columns):
         "total_amount": ["total amount", "total sales", "net amount", "المجموع", "total"],
         "cost_price": ["unit cost", "cost price", "purchase", "التكلفة", "cost"]
     }
-    
     mapping = {}
-    # Rule-based matching (100% reliable)
     for col in columns:
         col_l = str(col).lower().strip()
         for std, hints in standard_schema.items():
             if any(h in col_l for h in hints):
                 mapping[col] = std
                 break
-
-    # AI Enhancement (Optional)
-    try:
-        model = genai.GenerativeModel('gemini-1.5-flash')
-        prompt = f"Map these headers to {list(standard_schema.keys())}. Return ONLY JSON: {columns}"
-        response = model.generate_content(prompt)
-        ai_mapping = json.loads(response.text.strip().replace("```json", "").replace("```", ""))
-        for k, v in ai_mapping.items():
-            if isinstance(v, str) and k in columns: 
-                mapping[k] = v
-    except:
-        pass
     return mapping
 
 def generate_insights(df):
     def get_num(col_name):
         return pd.to_numeric(df.get(col_name, pd.Series([0.0]*len(df))), errors='coerce').fillna(0.0)
 
-    # 1. Revenue Logic
+    # Core Calculations
+    df['calc_qty'] = get_num("quantity")
     if "total_amount" in df.columns:
-        total_rev = float(get_num("total_amount").sum())
+        df['calc_rev'] = get_num("total_amount")
     else:
-        total_rev = float((get_num("unit_price") * get_num("quantity")).sum())
-
-    # 2. Cost Logic
-    total_cost = float((get_num("cost_price") * get_num("quantity")).sum())
-    is_est = False
-    if total_cost == 0:
-        total_cost = total_rev * 0.65 # Saudi Market Standard COGS
+        df['calc_rev'] = get_num("unit_price") * df['calc_qty']
+    
+    # Cost Logic
+    if "cost_price" in df.columns:
+        df['calc_cost'] = get_num("cost_price") * df['calc_qty']
+        is_est = False
+    else:
+        df['calc_cost'] = df['calc_rev'] * 0.65
         is_est = True
-
-    profit = total_rev - total_cost
-    margin = (profit / total_rev * 100) if total_rev > 0 else 0
-    vat = total_rev * 0.15 # ZATCA Saudi VAT
-
+        
+    df['calc_profit'] = df['calc_rev'] - df['calc_cost']
+    
+    # Leaderboard Metrics
+    name_col = "product_name" if "product_name" in df.columns else df.columns[0]
+    best_seller = df.groupby(name_col)['calc_qty'].sum().idxmax()
+    most_profitable = df.groupby(name_col)['calc_profit'].sum().idxmax()
+    
+    total_rev = float(df['calc_rev'].sum())
+    total_prof = float(df['calc_profit'].sum())
+    
     return {
         "revenue": round(total_rev, 2),
-        "profit": round(profit, 2),
-        "margin": round(margin, 2),
-        "vat": round(vat, 2),
+        "profit": round(total_prof, 2),
+        "margin": round((total_prof / total_rev * 100), 2) if total_rev > 0 else 0,
+        "vat": round(total_rev * 0.15, 2),
+        "best_seller": best_seller,
+        "most_profitable": most_profitable,
         "is_estimated": is_est,
-        "raw_data": df # Returned for charting
+        "df": df,
+        "name_col": name_col
     }
-
