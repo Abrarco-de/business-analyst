@@ -2,71 +2,77 @@ import streamlit as st
 import os
 import pandas as pd
 from business_ai_mvp import process_business_file, get_header_mapping, generate_insights, configure_ai
+import google.generativeai as genai
 
-st.set_page_config(page_title="Saudi SME Intelligence", layout="wide", page_icon="🇸🇦")
+# Page Config for professional look
+st.set_page_config(page_title="Visionary SME Analyst", layout="wide", page_icon="📈")
 
-# Initialize
+# Professional UI Styling
+st.markdown("""
+    <style>
+    .main { background-color: #f8f9fa; }
+    .stMetric { background-color: #ffffff; padding: 20px; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+    .reportview-container .main .block-container { padding-top: 2rem; }
+    h1 { color: #1E3A8A; font-weight: 800; }
+    </style>
+    """, unsafe_allow_safe_allowed=True)
+
+# API Setup
 API_KEY = os.getenv("GEMINI_API_KEY")
 configure_ai(API_KEY)
 
-st.title("🇸🇦 SME Profit Intelligence")
-st.caption("Advanced Retail Analytics for Saudi Businesses")
+st.title("📈 Visionary SME Analyst")
+st.markdown("##### Empowering Saudi SMEs with AI-Driven Financial Clarity")
 
-uploaded_file = st.file_uploader("Upload POS CSV/Excel", type=["csv", "xlsx"])
+uploaded_file = st.file_uploader("Drop your transaction file here", type=["csv", "xlsx"])
 
 if uploaded_file:
-    with st.spinner("Processing Business Data..."):
-        df_raw = process_business_file(uploaded_file)
-        
-        if df_raw is not None:
-            mapping = get_header_mapping(list(df_raw.columns))
-            df_final = df_raw.rename(columns=mapping)
-            results = generate_insights(df_final)
+    df_raw = process_business_file(uploaded_file)
+    if df_raw is not None:
+        mapping = get_header_mapping(list(df_raw.columns))
+        df_final = df_raw.rename(columns=mapping)
+        res = generate_insights(df_final)
 
-            # --- KPI SECTION ---
-            st.subheader("Financial Performance")
-            c1, c2, c3, c4 = st.columns(4)
+        # --- ROW 1: PRIMARY METRICS ---
+        st.markdown("### Financial Overview")
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Total Revenue", f"{res['revenue']:,} SAR")
+        m2.metric("Net Profit", f"{res['profit']:,} SAR", f"{res['margin']}% Margin")
+        m3.metric("VAT Due (ZATCA)", f"{res['vat']:,} SAR")
+        m4.metric("Data Status", "Estimated Cost" if res['is_estimated'] else "Verified Data")
+
+        st.divider()
+
+        # --- ROW 2: LEADERBOARD CARDS ---
+        st.markdown("### Performance Leaders")
+        l1, l2 = st.columns(2)
+        with l1:
+            st.success(f"🏆 **Best Selling Product:** \n\n {res['best_seller']}")
+        with l2:
+            st.info(f"💰 **Highest Profit Maker:** \n\n {res['most_profitable']}")
+
+        st.divider()
+
+        # --- ROW 3: VISUALS & LOG ---
+        col_left, col_right = st.columns([2, 1])
+
+        with col_left:
+            st.subheader("Sales Distribution")
+            top_10 = res['df'].groupby(res['name_col'])['calc_rev'].sum().sort_values(ascending=False).head(10)
+            st.bar_chart(top_10, color="#1E3A8A")
+
+        with col_right:
+            st.subheader("AI Smart Mapping")
+            with st.expander("Show Column Logic"):
+                st.json(mapping)
             
-            c1.metric("Total Revenue", f"{results['revenue']:,} SAR")
-            
-            p_label = "Net Profit (Est.)" if results['is_estimated'] else "Net Profit"
-            c2.metric(p_label, f"{results['profit']:,} SAR", f"{results['margin']}% Margin")
-            
-            c3.metric("ZATCA VAT (15%)", f"{results['vat']:,} SAR")
-            c4.metric("Transactions", len(df_raw))
+            # AI Advice Trigger
+            if st.button("✨ Generate AI Growth Strategy"):
+                model = genai.GenerativeModel('gemini-1.5-flash')
+                prompt = f"Business Revenue: {res['revenue']} SAR. Best Product: {res['best_seller']}. Give 3 specific strategies for a Saudi SME to double their profit."
+                advice = model.generate_content(prompt)
+                st.write(advice.text)
 
-            st.divider()
+        st.balloons()
 
-            # --- ANALYTICS SECTION ---
-            col_left, col_right = st.columns([2, 1])
-
-            with col_left:
-                st.subheader("Top Revenue Contributors")
-                # Prepare chart data
-                df_c = results['raw_data']
-                name_col = "product_name" if "product_name" in df_c.columns else df_c.columns[0]
-                
-                if "total_amount" in df_c.columns:
-                    rev_series = df_c["total_amount"]
-                else:
-                    rev_series = pd.to_numeric(df_c.get("unit_price", 0)) * pd.to_numeric(df_c.get("quantity", 0))
-                
-                chart_df = pd.DataFrame({ 'Item': df_c[name_col], 'Revenue': rev_series })
-                top_10 = chart_df.groupby('Item')['Revenue'].sum().sort_values(ascending=False).head(10)
-                st.bar_chart(top_10)
-
-            with col_right:
-                st.subheader("Intelligence Log")
-                st.info(f"AI mapped {len(mapping)} columns successfully.")
-                with st.expander("See column mapping"):
-                    st.json(mapping)
-                
-                if results['margin'] < 20:
-                    st.warning("⚠️ Low Margin Alert: Your profit margin is below 20%. Consider reviewing your costs.")
-                else:
-                    st.success("✅ Healthy Margins: Your business is performing well.")
-
-            st.success("Analysis ready for review.")
-        else:
-            st.error("Could not read file. Please ensure it's a valid CSV or Excel.")
 
