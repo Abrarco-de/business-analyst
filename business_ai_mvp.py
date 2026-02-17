@@ -49,6 +49,11 @@ DATA SUMMARY:
 {summary}
 """
 
-    response = model.generate_content(prompt)
+    response = client.models.generate_content(
+    model="gemini-1.5-flash-latest",
+    contents=prompt
+
+
     return response.text
+
 
