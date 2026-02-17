@@ -42,7 +42,7 @@ Example:
 """
 
     model = genai.GenerativeModel(MODEL_NAME)
-    response = model.generate_content(prompt)
+    response =model.generate_content("Analyze this data...")
 
     text = response.text.strip()
 
@@ -116,6 +116,7 @@ def generate_insights(df):
     insights["loss_products"] = loss_products[loss_products < 0].to_dict()
 
     return insights
+
 
 
 
