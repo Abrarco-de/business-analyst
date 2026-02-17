@@ -3,102 +3,71 @@ import google.generativeai as genai
 import json
 import re
 
-# ================= 1. AI CONFIG =================
-
 def configure_ai(api_key):
-    """Initializes the Gemini connection."""
     if api_key:
         genai.configure(api_key=api_key)
         return True
     return False
 
-# ================= 2. DATA CLEANING =================
-
 def clean_numeric_value(val):
-    """Removes 'SAR', commas, and text so Python can do math."""
     if pd.isna(val) or val == "": return 0.0
     if isinstance(val, (int, float)): return float(val)
-    
-    # Remove everything except numbers and decimals
     clean = re.sub(r'[^\d.]', '', str(val))
     try:
         return float(clean) if clean else 0.0
     except:
         return 0.0
 
-def process_business_file(uploaded_file):
-    """Reads CSV/Excel and cleans the hidden junk."""
-    try:
-        if uploaded_file.name.endswith('.csv'):
-            df = pd.read_csv(uploaded_file)
-        else:
-            df = pd.read_excel(uploaded_file)
-            
-        # Standardize numeric columns immediately
-        for col in df.columns:
-            if any(k in col.lower() for k in ['price', 'cost', 'qty', 'total', 'سعر', 'كمية', 'تكلفة']):
-                df[col] = df[col].apply(clean_numeric_value)
-        return df
-    except Exception as e:
-        print(f"File Processing Error: {e}")
-        return None
-
-# ================= 3. HEADER MAPPING =================
-
-def get_header_mapping(columns, model_name='gemini-1.5-flash'):
-    """
-    Maps messy POS headers to our standard schema.
-    Falls back to manual mapping if the API fails (429 error).
-    """
-    # 1. Manual Fallback Rules (Arabic & English)
-    fallback_map = {}
+def get_header_mapping(columns):
+    # Standard schema for Saudi Retail
     schema_hints = {
         "product_name": ["item", "product", "desc", "المنتج", "الصنف", "اسم"],
-        "unit_price": ["price", "rate", "sale", "سعر", "بيع", "sar", "الوحدة"],
+        "unit_price": ["price", "rate", "sale", "سعر", "بيع", "sar"],
         "quantity": ["qty", "count", "amount", "الكمية", "عدد"],
-        "cost_price": ["cost", "purchase", "buying", "تكلفة", "شراء", "التكلفة"]
+        "cost_price": ["cost", "purchase", "buying", "تكلفة", "شراء"],
+        "transaction_id": ["id", "invoice", "receipt", "رقم", "فاتورة"]
     }
-
-    # 2. Try AI First
+    
+    mapping = {}
+    # Try AI mapping first, but use local hints as fallback instantly
     try:
-        model = genai.GenerativeModel(model_name)
-        prompt = f"Map these headers: {columns} to standard keys: {list(schema_hints.keys())}. Return ONLY JSON."
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        prompt = f"Map these headers to {list(schema_hints.keys())}. Return ONLY JSON: {columns}"
         response = model.generate_content(prompt)
-        ai_map = json.loads(response.text.strip().replace("```json", "").replace("```", ""))
-        return ai_map
-    except Exception:
-        # 3. Use Fuzzy Fallback if AI is exhausted
+        mapping = json.loads(response.text.strip().replace("```json", "").replace("```", ""))
+    except:
         for col in columns:
-            col_lower = col.lower().strip()
-            for std_name, hints in schema_hints.items():
-                if any(h in col_lower for h in hints):
-                    fallback_map[col] = std_name
+            col_l = col.lower().strip()
+            for std, hints in schema_hints.items():
+                if any(h in col_l for h in hints):
+                    mapping[col] = std
                     break
-        return fallback_map
-
-# ================= 4. INSIGHTS ENGINE =================
+    return mapping
 
 def generate_insights(df):
-    """Calculates Revenue, Profit, and Margin."""
-    # Ensure math works even if columns are missing via .get()
-    rev = df.get("unit_price", 0) * df.get("quantity", 0)
-    cost = df.get("cost_price", 0) * df.get("quantity", 0)
+    # Calculations
+    df['total_sales'] = df.get('unit_price', 0) * df.get('quantity', 0)
+    df['total_cost'] = df.get('cost_price', 0) * df.get('quantity', 0)
     
-    # If cost is missing (common in Saudi SMEs), assume 30% margin for demo
-    if df.get("cost_price", pd.Series([0])).sum() == 0:
-        cost = rev * 0.7
+    # 1. Revenue & Profit
+    rev = df['total_sales'].sum()
+    # Fallback: if cost is 0, estimate 65% COGS for retail
+    cost = df['total_cost'].sum() if df['total_cost'].sum() > 0 else (rev * 0.65)
+    profit = rev - cost
     
-    total_rev = rev.sum()
-    total_prof = (rev - cost).sum()
+    # 2. ZATCA VAT (15% on Revenue)
+    vat_amount = rev * 0.15
     
-    insights = {
-        "total_revenue": round(total_rev, 2),
-        "total_profit": round(total_prof, 2),
-        "profit_margin_percent": 0.0
+    # 3. Average Transaction Value (ATV)
+    # Using Transaction ID if exists, otherwise average per row
+    unique_tx = df['transaction_id'].nunique() if 'transaction_id' in df.columns else len(df)
+    atv = rev / unique_tx if unique_tx > 0 else 0
+    
+    return {
+        "total_revenue": round(rev, 2),
+        "total_profit": round(profit, 2),
+        "margin": round((profit/rev * 100), 2) if rev > 0 else 0,
+        "vat_due": round(vat_amount, 2),
+        "atv": round(atv, 2),
+        "total_items": int(df.get('quantity', 0).sum())
     }
-    
-    if total_rev > 0:
-        insights["profit_margin_percent"] = round((total_prof / total_rev) * 100, 2)
-        
-    return insights
-
