@@ -1,5 +1,6 @@
 import streamlit as st
-from business_ai_mvp import process_business_file, generate_insights
+import business_ai_mvp as ai
+
 
 st.set_page_config(page_title="AI Business Analyst")
 
@@ -31,3 +32,4 @@ if uploaded_file:
 
     except Exception as e:
         st.error(str(e))
+
