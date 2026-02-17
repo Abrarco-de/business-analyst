@@ -45,20 +45,30 @@ def get_header_mapping(columns):
             if any(h in col_l for h in hints):
                 mapping[col] = std
                 break
+    
+    # AI Fallback
+    try:
+        # Changed to the most stable model name
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        prompt = f"Map these headers to {list(standard_schema.keys())}. Return ONLY JSON: {columns}"
+        response = model.generate_content(prompt)
+        ai_mapping = json.loads(response.text.strip().replace("```json", "").replace("```", ""))
+        for k, v in ai_mapping.items():
+            if k in columns: mapping[k] = v
+    except:
+        pass # Use local mapping if AI fails
     return mapping
 
 def generate_insights(df):
     def get_num(col_name):
         return pd.to_numeric(df.get(col_name, pd.Series([0.0]*len(df))), errors='coerce').fillna(0.0)
 
-    # Core Calculations
     df['calc_qty'] = get_num("quantity")
     if "total_amount" in df.columns:
         df['calc_rev'] = get_num("total_amount")
     else:
         df['calc_rev'] = get_num("unit_price") * df['calc_qty']
     
-    # Cost Logic
     if "cost_price" in df.columns:
         df['calc_cost'] = get_num("cost_price") * df['calc_qty']
         is_est = False
@@ -67,20 +77,17 @@ def generate_insights(df):
         is_est = True
         
     df['calc_profit'] = df['calc_rev'] - df['calc_cost']
-    
-    # Leaderboard Metrics
     name_col = "product_name" if "product_name" in df.columns else df.columns[0]
-    best_seller = df.groupby(name_col)['calc_qty'].sum().idxmax()
-    most_profitable = df.groupby(name_col)['calc_profit'].sum().idxmax()
     
-    total_rev = float(df['calc_rev'].sum())
-    total_prof = float(df['calc_profit'].sum())
+    # Safety check for empty data
+    best_seller = df.groupby(name_col)['calc_qty'].sum().idxmax() if not df.empty else "N/A"
+    most_profitable = df.groupby(name_col)['calc_profit'].sum().idxmax() if not df.empty else "N/A"
     
     return {
-        "revenue": round(total_rev, 2),
-        "profit": round(total_prof, 2),
-        "margin": round((total_prof / total_rev * 100), 2) if total_rev > 0 else 0,
-        "vat": round(total_rev * 0.15, 2),
+        "revenue": round(float(df['calc_rev'].sum()), 2),
+        "profit": round(float(df['calc_profit'].sum()), 2),
+        "margin": round(float((df['calc_profit'].sum() / df['calc_rev'].sum() * 100)), 2) if df['calc_rev'].sum() > 0 else 0,
+        "vat": round(float(df['calc_rev'].sum() * 0.15), 2),
         "best_seller": best_seller,
         "most_profitable": most_profitable,
         "is_estimated": is_est,
