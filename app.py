@@ -1,77 +1,90 @@
 import streamlit as st
 import pandas as pd
-from business_ai_mvp import process_business_file, generate_insights
+import google.generativeai as genai
+import json
+import os
+import re
 
-# ================= PAGE CONFIG =================
-st.set_page_config(
-    page_title="AI Business Analyst",
-    page_icon="📊",
-    layout="centered"
-)
+# ================= 1. SETUP & CONFIG =================
+st.set_page_config(page_title="Saudi SME Analyst", page_icon="🇸🇦", layout="wide")
 
-# ================= UI =================
-st.title("📊 AI Business Analyst for Small Businesses")
-st.write(
-    "Upload your **sales / POS file** (CSV or Excel). "
-    "The AI will clean the data and generate business insights automatically."
-)
+# Replace with your actual key or use Streamlit Secrets
+API_KEY = os.getenv("GEMINI_API_KEY")
 
-# ================= FILE UPLOAD =================
-uploaded_file = st.file_uploader(
-    "Upload CSV or Excel file",
-    type=["csv", "xlsx"]
-)
-
-if uploaded_file:
-    try:
-        with st.spinner("🔍 Cleaning and understanding your data..."):
-            df = process_business_file(uploaded_file)
-
-        st.success("✅ File processed successfully")
-
-        # ================= PREVIEW =================
-        st.subheader("📄 Cleaned Data Preview")
-        st.dataframe(df.head(10), use_container_width=True)
-
-        # ================= INSIGHTS =================
-        if st.button("📈 Generate Business Insights"):
-            with st.spinner("📊 Generating insights..."):
-                insights = generate_insights(df)
-
-            st.subheader("📊 Business Insights")
-
-            col1, col2, col3 = st.columns(3)
-
-            col1.metric("Total Revenue (SAR)", insights["total_revenue"])
-            col2.metric("Total Profit (SAR)", insights["total_profit"])
-            col3.metric("Profit Margin (%)", insights["profit_margin_percent"])
-
-            # ================= TOP PRODUCTS =================
-            if insights["top_products"]:
-                st.subheader("🔥 Top Selling Products")
-                top_df = pd.DataFrame(
-                    insights["top_products"].items(),
-                    columns=["Product", "Revenue"]
-                )
-                st.table(top_df)
-
-            # ================= LOSS PRODUCTS =================
-            if insights["loss_products"]:
-                st.subheader("⚠️ Loss-Making Products")
-                loss_df = pd.DataFrame(
-                    insights["loss_products"].items(),
-                    columns=["Product", "Loss"]
-                )
-                st.table(loss_df)
-            else:
-                st.success("✅ No loss-making products detected")
-
-    except Exception as e:
-        st.error("❌ Something went wrong while processing the file")
-        st.exception(e)
-
+if API_KEY:
+    genai.configure(api_key=API_KEY)
 else:
-    st.info("👆 Upload a file to get started")
+    st.error("🔑 API Key Missing! Please add your GEMINI_API_KEY.")
+    st.stop()
+
+# ================= 2. DATA CLEANING ENGINE =================
+
+def clean_numeric_value(val):
+    """Removes 'SAR', commas, and text so Python can do math."""
+    if pd.isna(val): return 0.0
+    if isinstance(val, (int, float)): return float(val)
+    # Remove everything except numbers and decimals
+    clean = re.sub(r'[^\d.]', '', str(val))
+    return float(clean) if clean else 0.0
+
+def process_file(uploaded_file):
+    """Reads CSV/Excel and cleans the hidden junk."""
+    try:
+        df = pd.read_csv(uploaded_file) if uploaded_file.name.endswith('.csv') else pd.read_excel(uploaded_file)
+        # Clean all potential number columns immediately
+        for col in df.columns:
+            if any(k in col.lower() for k in ['price', 'cost', 'qty', 'total', 'amt', 'سعر', 'كمية']):
+                df[col] = df[col].apply(clean_numeric_value)
+        return df
+    except Exception as e:
+        st.error(f"❌ File Error: {e}")
+        return None
+
+# ================= 3. AI MAPPING & INSIGHTS =================
+
+def get_ai_mapping(columns):
+    """Maps messy headers to standard names using Gemini 2.0."""
+    prompt = f"""
+    Map these headers: {columns} 
+    to exactly: [transaction_id, timestamp, product_name, quantity, unit_price, cost_price].
+    Return ONLY valid JSON. Arabic is okay.
+    """
+    model = genai.GenerativeModel('gemini-2.0-flash')
+    response = model.generate_content(prompt)
+    try:
+        clean_text = response.text.strip().replace("```json", "").replace("```", "")
+        return json.loads(clean_text)
+    except:
+        return {}
+
+def generate_insights(df):
+    """Calculates KPIs with safety fallbacks to prevent KeyErrors."""
+    # Ensure columns exist even if AI mapping failed
+    rev = df.get("unit_price", 0) * df.get("quantity", 0)
+    cost = df.get("cost_price", 0) * df.get("quantity", 0)
+    
+    total_rev = rev.sum()
+    total_prof = (rev - cost).sum()
+    
+    # SAFETY: Always define the key to prevent KeyError
+    insights = {
+        "total_revenue": round(total_rev, 2),
+        "total_profit": round(total_prof, 2),
+        "profit_margin_percent": 0.0  # Default value
+    }
+    
+    if total_rev > 0:
+        insights["profit_margin_percent"] = round((total_prof / total_rev) * 100, 2)
+        
+    return insights
+
+# ================= 4. DASHBOARD UI =================
+
+st.title("🇸🇦 Saudi SME Profit AI")
+st.write("Clean your POS data for 69 SAR/month.")
+
+file =
+
 
 
 
