@@ -57,8 +57,21 @@ if uploaded_file:
 
             # ================= LOSS PRODUCTS =================
             if insights["loss_products"]:
-                st.subheader("⚠️ Loss-Making P
+                st.subheader("⚠️ Loss-Making Products")
+                loss_df = pd.DataFrame(
+                    insights["loss_products"].items(),
+                    columns=["Product", "Loss"]
+                )
+                st.table(loss_df)
+            else:
+                st.success("✅ No loss-making products detected")
 
+    except Exception as e:
+        st.error("❌ Something went wrong while processing the file")
+        st.exception(e)
+
+else:
+    st.info("👆 Upload a file to get started")
 
 
 
