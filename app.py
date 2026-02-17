@@ -2,38 +2,40 @@ import streamlit as st
 import business_ai_mvp as ai
 
 
-
-
-st.set_page_config(page_title="AI Business Analyst")
+st.set_page_config(
+    page_title="AI Business Analyst",
+    layout="wide"
+)
 
 st.title("📊 AI Business Analyst (MVP)")
-st.write("Upload CSV or ZATCA XML to get instant insights.")
+
+st.markdown(
+    "Upload your business report (CSV / Excel) and get AI-driven insights."
+)
 
 uploaded_file = st.file_uploader(
-    "Upload file",
-    type=["csv", "xml"]
+    "Upload business file",
+    type=["csv", "xlsx", "xls"]
 )
 
 if uploaded_file:
     try:
-        df = process_business_file(uploaded_file)
-        insights = generate_insights(df)
+        df = ai.process_business_file(uploaded_file)
 
-        st.success("Analysis Complete")
+        st.subheader("Preview Data")
+        st.dataframe(df.head())
 
-        st.metric("Total Revenue", insights["total_revenue"])
-        st.metric("Total Profit", insights["total_profit"])
-        st.metric("Profit Margin (%)", insights["profit_margin"])
+        if st.button("Generate AI Insights"):
+            with st.spinner("Analyzing with AI..."):
+                insights = ai.generate_insights(df)
 
-        st.subheader("Top Products")
-        st.json(insights["top_products"])
-
-        if insights["loss_products"]:
-            st.subheader("Loss-Making Products")
-            st.write(insights["loss_products"])
+            st.subheader("AI Insights")
+            st.write(insights)
 
     except Exception as e:
         st.error(str(e))
+
+
 
 
 
