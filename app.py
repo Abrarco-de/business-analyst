@@ -34,8 +34,13 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # API Setup
-API_KEY = os.getenv("GEMINI_API_KEY")
-configure_ai(API_KEY)
+# Replace the old API setup with this:
+API_KEY = st.sidebar.text_input("Enter Gemini API Key", type="password")
+
+if API_KEY:
+    configure_ai(API_KEY)
+else:
+    st.sidebar.warning("Please enter your API Key to enable AI Strategy.")
 
 st.title("📈 Visionary SME Analyst")
 st.markdown("##### Professional Business Intelligence for Saudi Retailers")
@@ -82,14 +87,29 @@ if file:
                     st.json(mapping)
                 
                 if st.button("✨ Generate AI Growth Strategy"):
-                    try:
-                        model = genai.GenerativeModel('gemini-1.5-flash')
-                        prompt = f"Business Revenue: {res['revenue']} SAR. Best Product: {res['best_seller']}. Most profitable: {res['most_profitable']}. Give 3 specific strategies for a Saudi SME to grow."
-                        response = model.generate_content(prompt)
-                        st.write(response.text)
-                    except Exception as e:
-                        st.error("AI strategy is temporarily unavailable. Check your API key.")
+    if not API_KEY:
+        st.error("Missing API Key! Please enter it in the sidebar.")
+    else:
+        try:
+            # Use 'gemini-1.5-flash' - it is the most stable version
+            model = genai.GenerativeModel('gemini-1.5-flash')
             
+            # Simple prompt to test connection
+            prompt = f"""
+            Act as a Saudi Business Consultant. 
+            The business has {res['revenue']} SAR revenue. 
+            Top product is {res['best_seller']}. 
+            Most profitable is {res['most_profitable']}. 
+            Give 3 short, high-impact growth tips for the Saudi market.
+            """
+            
+            response = model.generate_content(prompt)
+            st.markdown("### 🤖 AI Growth Strategy")
+            st.write(response.text)
+            
+        except Exception as e:
+            st.error(f"AI Error: {str(e)}") # This will show the real error message
             st.balloons()
+
 
 
