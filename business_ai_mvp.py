@@ -4,10 +4,14 @@ import json
 import re
 
 def configure_ai(api_key):
-    if api_key:
+    if not api_key:
+        return False
+    try:
         genai.configure(api_key=api_key)
         return True
-    return False
+    except Exception as e:
+        print(f"AI Config Error: {e}")
+        return False
 
 def clean_numeric_value(val):
     if pd.isna(val) or val == "": return 0.0
@@ -54,7 +58,8 @@ def get_header_mapping(columns):
         prompt = f"Map these headers to {list(schema_hints.keys())}. Return ONLY JSON: {columns}"
         response = model.generate_content(prompt)
         mapping = json.loads(response.text.strip().replace("```json", "").replace("```", ""))
-    except:
+    except Exception:
+        # Robust Local Fallback
         for col in columns:
             col_l = col.lower().strip()
             for std, hints in schema_hints.items():
@@ -64,34 +69,38 @@ def get_header_mapping(columns):
     return mapping
 
 def generate_insights(df):
-    # 1. Base Calculations
-    df['calc_rev'] = df['total_amount'] if 'total_amount' in df.columns else (df.get('unit_price', 0) * df.get('quantity', 0))
-    
-    # Calculate Cost
+    # 1. Base Revenue Calculation (Prevents Double-Counting)
+    if "total_amount" in df.columns and df["total_amount"].sum() > 0:
+        df['calc_rev'] = df['total_amount']
+    elif "unit_price" in df.columns and "quantity" in df.columns:
+        df['calc_rev'] = df['unit_price'] * df['quantity']
+    elif "unit_price" in df.columns:
+        df['calc_rev'] = df['unit_price']
+    else:
+        df['calc_rev'] = 0.0
+
+    # 2. Cost & Profit Calculation
     if 'cost_price' in df.columns and df['cost_price'].sum() > 0:
         df['calc_cost'] = df['cost_price'] * df.get('quantity', 1)
         is_estimated = False
     else:
-        df['calc_cost'] = df['calc_rev'] * 0.65 # Fallback 65% COGS
+        df['calc_cost'] = df['calc_rev'] * 0.65 # Industry Standard for Saudi Retail
         is_estimated = True
     
     df['calc_profit'] = df['calc_rev'] - df['calc_cost']
-    
     total_rev = df['calc_rev'].sum()
     total_prof = df['calc_profit'].sum()
     
-    # 2. Advanced Product Metrics (Fixed the GroupBy error)
+    # 3. Product Analysis (Fixed Safety for Line 65)
     prod_col = 'product_name' if 'product_name' in df.columns else df.columns[0]
     
-    top_revenue_product = df.groupby(prod_col)['calc_rev'].sum().idxmax()
-    top_profit_product = df.groupby(prod_col)['calc_profit'].sum().idxmax()
+    rev_group = df.groupby(prod_col)['calc_rev'].sum()
+    top_revenue_product = rev_group.idxmax() if not rev_group.empty else "N/A"
     
-    if 'quantity' in df.columns and df['quantity'].sum() > 0:
-        top_qty_product = df.groupby(prod_col)['quantity'].sum().idxmax()
-    else:
-        top_qty_product = "N/A"
+    prof_group = df.groupby(prod_col)['calc_profit'].sum()
+    top_profit_product = prof_group.idxmax() if not prof_group.empty else "N/A"
     
-    # 3. Growth Metric (Comparing 1st half vs 2nd half of the dataset)
+    # 4. Growth Metric (1st Half vs 2nd Half)
     growth = 0
     if 'date' in df.columns and not df['date'].isnull().all():
         df_sorted = df.sort_values('date')
@@ -109,7 +118,6 @@ def generate_insights(df):
         "vat_due": round(total_rev * 0.15, 2),
         "growth_pct": round(growth, 2),
         "top_product_rev": top_revenue_product,
-        "top_product_qty": top_qty_product,
         "top_product_profit": top_profit_product,
         "is_estimated_cost": is_estimated,
         "avg_transaction": round(total_rev / len(df), 2) if len(df) > 0 else 0
