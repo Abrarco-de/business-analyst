@@ -90,6 +90,31 @@ def generate_insights(df):
     insights["total_revenue"] = round(df["revenue"].sum(), 2)
     insights["total_profit"] = round(df["profit"].sum(), 2)
 
-    if i
+    if insights["total_revenue"] > 0:
+        insights["profit_margin_percent"] = round(
+            (insights["total_profit"] / insights["total_revenue"]) * 100, 2
+        )
+    else:
+        insights["profit_margin_percent"] = 0
+
+    top_products = (
+        df.groupby("product_name")["revenue"]
+        .sum()
+        .sort_values(ascending=False)
+        .head(5)
+    )
+
+    loss_products = (
+        df.groupby("product_name")["profit"]
+        .sum()
+        .sort_values()
+        .head(5)
+    )
+
+    insights["top_products"] = top_products.to_dict()
+    insights["loss_products"] = loss_products[loss_products < 0].to_dict()
+
+    return insights
+
 
 
