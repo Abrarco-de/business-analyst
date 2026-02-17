@@ -29,7 +29,7 @@ def process_business_file(uploaded_file):
             if any(k in col.lower() for k in ['price', 'cost', 'qty', 'total', 'amount', 'سعر', 'كمية']):
                 df[col] = df[col].apply(clean_numeric_value)
         
-        # Try to standardize Date column
+        # Standardize Date column
         date_cols = [c for c in df.columns if 'date' in c.lower() or 'تاريخ' in c.lower()]
         if date_cols:
             df[date_cols[0]] = pd.to_datetime(df[date_cols[0]], errors='coerce')
@@ -45,7 +45,6 @@ def get_header_mapping(columns):
         "quantity": ["qty", "quantity", "count", "الكمية"],
         "total_amount": ["total amount", "total sales", "net amount", "المجموع"],
         "cost_price": ["unit cost", "cost price", "purchase price", "التكلفة"],
-        "category": ["category", "type", "group", "الفئة", "النوع"],
         "date": ["date", "time", "تاريخ"]
     }
     
@@ -67,43 +66,51 @@ def get_header_mapping(columns):
 def generate_insights(df):
     # 1. Base Calculations
     df['calc_rev'] = df['total_amount'] if 'total_amount' in df.columns else (df.get('unit_price', 0) * df.get('quantity', 0))
-    # If no cost provided, assume 65% COGS
-    if 'cost_price' not in df.columns or df['cost_price'].sum() == 0:
-        df['calc_cost'] = df['calc_rev'] * 0.65
-        is_estimated = True
-    else:
+    
+    # Calculate Cost
+    if 'cost_price' in df.columns and df['cost_price'].sum() > 0:
         df['calc_cost'] = df['cost_price'] * df.get('quantity', 1)
         is_estimated = False
+    else:
+        df['calc_cost'] = df['calc_rev'] * 0.65 # Fallback 65% COGS
+        is_estimated = True
     
     df['calc_profit'] = df['calc_rev'] - df['calc_cost']
     
     total_rev = df['calc_rev'].sum()
     total_prof = df['calc_profit'].sum()
     
-    # 2. Product Level Metrics
-    prod_col = 'product_name' if 'product_name' in df.columns else (df.columns[0])
+    # 2. Advanced Product Metrics (Fixed the GroupBy error)
+    prod_col = 'product_name' if 'product_name' in df.columns else df.columns[0]
     
     top_revenue_product = df.groupby(prod_col)['calc_rev'].sum().idxmax()
-    top_qty_product = df.groupby(prod_col).get('quantity', pd.Series([0]*len(df))).sum().idxmax() if 'quantity' in df.columns else "N/A"
+    top_profit_product = df.groupby(prod_col)['calc_profit'].sum().idxmax()
     
-    # 3. Growth Metric (Comparing first half vs second half of data)
-    if 'date' in df.columns and not df['date'].isnull().all():
-        df = df.sort_values('date')
-        mid = len(df) // 2
-        first_half = df['calc_rev'].iloc[:mid].sum()
-        second_half = df['calc_rev'].iloc[mid:].sum()
-        growth = ((second_half - first_half) / first_half * 100) if first_half > 0 else 0
+    if 'quantity' in df.columns and df['quantity'].sum() > 0:
+        top_qty_product = df.groupby(prod_col)['quantity'].sum().idxmax()
     else:
-        growth = 0
+        top_qty_product = "N/A"
+    
+    # 3. Growth Metric (Comparing 1st half vs 2nd half of the dataset)
+    growth = 0
+    if 'date' in df.columns and not df['date'].isnull().all():
+        df_sorted = df.sort_values('date')
+        mid = len(df_sorted) // 2
+        if mid > 0:
+            first_half = df_sorted['calc_rev'].iloc[:mid].sum()
+            second_half = df_sorted['calc_rev'].iloc[mid:].sum()
+            if first_half > 0:
+                growth = ((second_half - first_half) / first_half) * 100
         
     return {
-        "total_revenue": round(total_rev, 2),
-        "total_profit": round(total_prof, 2),
+        "total_revenue": round(float(total_rev), 2),
+        "total_profit": round(float(total_prof), 2),
         "margin": round((total_prof/total_rev*100), 2) if total_rev > 0 else 0,
         "vat_due": round(total_rev * 0.15, 2),
         "growth_pct": round(growth, 2),
         "top_product_rev": top_revenue_product,
         "top_product_qty": top_qty_product,
+        "top_product_profit": top_profit_product,
         "is_estimated_cost": is_estimated,
         "avg_transaction": round(total_rev / len(df), 2) if len(df) > 0 else 0
     }
