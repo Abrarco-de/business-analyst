@@ -83,8 +83,28 @@ def generate_insights(df):
 st.title("🇸🇦 Saudi SME Profit AI")
 st.write("Clean your POS data for 69 SAR/month.")
 
-file =
+file = st.file_uploader("Upload your POS Export", type=["csv", "xlsx"])
 
+if file:
+    with st.spinner("AI is analyzing..."):
+        raw_df = process_file(file)
+        if raw_df is not None:
+            # 1. AI Rename
+            mapping = get_ai_mapping(list(raw_df.columns))
+            df = raw_df.rename(columns=mapping)
+            
+            # 2. Get Insights
+            results = generate_insights(df)
+            
+            # 3. Display Metrics (Using .get() for double safety)
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Total Sales", f"{results.get('total_revenue', 0):,.2f} SAR")
+            c2.metric("Net Profit", f"{results.get('total_profit', 0):,.2f} SAR")
+            c3.metric("Margin (%)", f"{results.get('profit_margin_percent', 0)}%")
+            
+            st.divider()
+            st.subheader("Data Preview")
+            st.dataframe(df.head(10), use_container_width=True)
 
 
 
