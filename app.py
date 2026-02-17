@@ -4,87 +4,92 @@ import pandas as pd
 from business_ai_mvp import process_business_file, get_header_mapping, generate_insights, configure_ai
 import google.generativeai as genai
 
-# Page Config for professional look
 st.set_page_config(page_title="Visionary SME Analyst", layout="wide", page_icon="📈")
 
-# Professional UI Styling
+# --- UI STYLING (FIXED INVISIBLE TEXT) ---
 st.markdown("""
     <style>
-    /* This targets the container of the metric */
+    /* Card Container */
     [data-testid="stMetric"] {
-        background-color: #1E3A8A; /* Deep Blue background */
-        color: white !important;    /* Force white text */
-        padding: 15px;
-        border-radius: 10px;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        background-color: #1E3A8A !important; 
+        border-radius: 15px !important;
+        padding: 20px !important;
+        box-shadow: 0 4px 10px rgba(0,0,0,0.2) !important;
     }
-    
-    /* This ensures the label (title) is also visible */
+    /* Metric Value (The big numbers) */
+    [data-testid="stMetricValue"] {
+        color: #FFFFFF !important;
+        font-weight: bold !important;
+    }
+    /* Metric Label (The titles) */
     [data-testid="stMetricLabel"] {
         color: #E2E8F0 !important;
     }
+    /* Metric Delta (The green/red arrows) */
+    [data-testid="stMetricDelta"] {
+        color: #4ADE80 !important;
+        background-color: rgba(0,0,0,0) !important;
+    }
     </style>
-    """, unsafe_allow_html=True)  # Fixed parameter name
+    """, unsafe_allow_html=True)
 
 # API Setup
 API_KEY = os.getenv("GEMINI_API_KEY")
 configure_ai(API_KEY)
 
 st.title("📈 Visionary SME Analyst")
-st.markdown("##### Empowering Saudi SMEs with AI-Driven Financial Clarity")
+st.markdown("##### Professional Business Intelligence for Saudi Retailers")
 
-uploaded_file = st.file_uploader("Drop your transaction file here", type=["csv", "xlsx"])
+file = st.file_uploader("Upload Transaction File (CSV/Excel)", type=["csv", "xlsx"])
 
-if uploaded_file:
-    df_raw = process_business_file(uploaded_file)
-    if df_raw is not None:
-        mapping = get_header_mapping(list(df_raw.columns))
-        df_final = df_raw.rename(columns=mapping)
-        res = generate_insights(df_final)
+if file:
+    with st.spinner("Analyzing Business performance..."):
+        df_raw = process_business_file(file)
+        if df_raw is not None:
+            mapping = get_header_mapping(list(df_raw.columns))
+            df_final = df_raw.rename(columns=mapping)
+            res = generate_insights(df_final)
 
-        # --- ROW 1: PRIMARY METRICS ---
-        st.markdown("### Financial Overview")
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Total Revenue", f"{res['revenue']:,} SAR")
-        m2.metric("Net Profit", f"{res['profit']:,} SAR", f"{res['margin']}% Margin")
-        m3.metric("VAT Due (ZATCA)", f"{res['vat']:,} SAR")
-        m4.metric("Data Status", "Estimated Cost" if res['is_estimated'] else "Verified Data")
+            # --- TOP ROW: KPI CARDS ---
+            st.subheader("Executive Summary")
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Total Revenue", f"{res['revenue']:,} SAR")
+            c2.metric("Net Profit", f"{res['profit']:,} SAR", f"{res['margin']}% Margin")
+            c3.metric("ZATCA VAT (15%)", f"{res['vat']:,} SAR")
+            c4.metric("Status", "Estimated Cost" if res['is_estimated'] else "Verified Data")
 
-        st.divider()
+            st.divider()
 
-        # --- ROW 2: LEADERBOARD CARDS ---
-        st.markdown("### Performance Leaders")
-        l1, l2 = st.columns(2)
-        with l1:
-            st.success(f"🏆 **Best Selling Product:** \n\n {res['best_seller']}")
-        with l2:
-            st.info(f"💰 **Highest Profit Maker:** \n\n {res['most_profitable']}")
+            # --- MIDDLE ROW: LEADERS ---
+            col_a, col_b = st.columns(2)
+            with col_a:
+                st.info(f"🏆 **Best Seller (Volume):** \n\n {res['best_seller']}")
+            with col_b:
+                st.success(f"💰 **Most Profitable (Value):** \n\n {res['most_profitable']}")
 
-        st.divider()
+            st.divider()
 
-        # --- ROW 3: VISUALS & LOG ---
-        col_left, col_right = st.columns([2, 1])
+            # --- BOTTOM ROW: CHARTS ---
+            chart_col, debug_col = st.columns([2, 1])
+            with chart_col:
+                st.subheader("Revenue by Product Category")
+                top_10 = res['df'].groupby(res['name_col'])['calc_rev'].sum().sort_values(ascending=False).head(10)
+                st.bar_chart(top_10, color="#1E3A8A")
 
-        with col_left:
-            st.subheader("Sales Distribution")
-            top_10 = res['df'].groupby(res['name_col'])['calc_rev'].sum().sort_values(ascending=False).head(10)
-            st.bar_chart(top_10, color="#1E3A8A")
-
-        with col_right:
-            st.subheader("AI Smart Mapping")
-            with st.expander("Show Column Logic"):
-                st.json(mapping)
+            with debug_col:
+                st.subheader("AI Intelligence Log")
+                with st.expander("View Column Mapping"):
+                    st.json(mapping)
+                
+                if st.button("✨ Generate AI Growth Strategy"):
+                    try:
+                        model = genai.GenerativeModel('gemini-1.5-flash')
+                        prompt = f"Business Revenue: {res['revenue']} SAR. Best Product: {res['best_seller']}. Most profitable: {res['most_profitable']}. Give 3 specific strategies for a Saudi SME to grow."
+                        response = model.generate_content(prompt)
+                        st.write(response.text)
+                    except Exception as e:
+                        st.error("AI strategy is temporarily unavailable. Check your API key.")
             
-            # AI Advice Trigger
-            if st.button("✨ Generate AI Growth Strategy"):
-                model = genai.GenerativeModel('gemini-1.5-flash-latest')
-                prompt = f"Business Revenue: {res['revenue']} SAR. Best Product: {res['best_seller']}. Give 3 specific strategies for a Saudi SME to double their profit."
-                advice = model.generate_content(prompt)
-                st.write(advice.text)
-
-        st.balloons()
-
-
-
+            st.balloons()
 
 
