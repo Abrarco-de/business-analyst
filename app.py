@@ -87,12 +87,12 @@ if file:
                     st.json(mapping)
                 
                 if st.button("✨ Generate AI Growth Strategy"):
-    if not API_KEY:
-        st.error("Missing API Key! Please enter it in the sidebar.")
-    else:
-        try:
+                    if not API_KEY:
+                        st.error("Missing API Key! Please enter it in the sidebar.")
+                    else:
+                       try:
             # Use 'gemini-1.5-flash' - it is the most stable version
-            model = genai.GenerativeModel('gemini-1.5-flash')
+                          model = genai.GenerativeModel('gemini-1.5-flash')
             
             # Simple prompt to test connection
             prompt = f"""
@@ -110,6 +110,7 @@ if file:
         except Exception as e:
             st.error(f"AI Error: {str(e)}") # This will show the real error message
             st.balloons()
+
 
 
 
