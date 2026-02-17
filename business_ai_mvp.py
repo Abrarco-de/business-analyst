@@ -12,7 +12,7 @@ if not API_KEY:
 
 genai.configure(api_key=API_KEY)
 
-MODEL_NAME = "gemini-1.5-flash-latest"
+MODEL_NAME = "gemini-1.5-flash"
 
 # ================= AI HEADER MAPPING =================
 
@@ -115,6 +115,7 @@ def generate_insights(df):
     insights["loss_products"] = loss_products[loss_products < 0].to_dict()
 
     return insights
+
 
 
 
