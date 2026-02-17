@@ -10,12 +10,14 @@ st.set_page_config(page_title="Visionary SME Analyst", layout="wide", page_icon=
 # Professional UI Styling
 st.markdown("""
     <style>
-    .main { background-color: #f8f9fa; }
-    .stMetric { background-color: #ffffff; padding: 20px; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
-    .reportview-container .main .block-container { padding-top: 2rem; }
-    h1 { color: #1E3A8A; font-weight: 800; }
+    .stMetric {
+        background-color: #ffffff;
+        padding: 20px;
+        border-radius: 10px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    }
     </style>
-    """, unsafe_allow_safe_allowed=True)
+    """, unsafe_allow_html=True)  # Fixed parameter name
 
 # API Setup
 API_KEY = os.getenv("GEMINI_API_KEY")
@@ -74,5 +76,6 @@ if uploaded_file:
                 st.write(advice.text)
 
         st.balloons()
+
 
 
