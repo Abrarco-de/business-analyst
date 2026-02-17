@@ -1,59 +1,95 @@
-import os
 import pandas as pd
+import json
+import os
 import google.generativeai as genai
 
+# ================= CONFIG =================
 
-# ---------- INTERNAL: Lazy Gemini Setup ----------
-def _get_model():
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        raise RuntimeError("GEMINI_API_KEY not set in Streamlit Secrets")
+API_KEY = os.getenv("GEMINI_API_KEY")
 
-    genai.configure(api_key=api_key)
-    return genai.GenerativeModel("gemini-1.5-flash")
+if not API_KEY:
+    raise RuntimeError("GEMINI_API_KEY is not set in Streamlit Secrets")
 
+genai.configure(api_key=API_KEY)
 
-# ---------- FILE PROCESSING ----------
+MODEL_NAME = "gemini-1.5-flash-latest"
+
+# ================= AI HEADER MAPPING =================
+
+def get_header_mapping(dirty_columns):
+    prompt = f"""
+You are a professional data analyst.
+
+I have a business CSV/Excel file with these headers:
+{dirty_columns}
+
+Map them to this STANDARD SCHEMA:
+- transaction_id
+- timestamp
+- product_name
+- quantity
+- unit_price
+- cost_price
+
+Rules:
+- Return ONLY valid JSON
+- Do NOT explain anything
+- If a column is missing, ignore it
+
+Example:
+{{"Item Name": "product_name"}}
+"""
+
+    model = genai.GenerativeModel(MODEL_NAME)
+    response = model.generate_content(prompt)
+
+    text = response.text.strip()
+
+    # Safety cleanup
+    text = text.replace("```json", "").replace("```", "").strip()
+
+    return json.loads(text)
+
+# ================= FILE PROCESSING =================
+
 def process_business_file(uploaded_file):
-    """
-    Accepts CSV / Excel file from Streamlit uploader
-    Returns pandas DataFrame
-    """
+    # Read file safely
     if uploaded_file.name.endswith(".csv"):
         df = pd.read_csv(uploaded_file)
-    elif uploaded_file.name.endswith((".xlsx", ".xls")):
-        df = pd.read_excel(uploaded_file)
     else:
-        raise ValueError("Unsupported file type")
+        df = pd.read_excel(uploaded_file)
+
+    original_columns = list(df.columns)
+
+    # AI mapping
+    mapping = get_header_mapping(original_columns)
+
+    # Rename columns
+    df = df.rename(columns=mapping)
+
+    # Keep only required columns
+    required_cols = list(mapping.values())
+    df = df[required_cols]
+
+    # Numeric cleaning
+    for col in ["quantity", "unit_price", "cost_price"]:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
 
     return df
 
+# ================= INSIGHTS ENGINE =================
 
-# ---------- AI INSIGHTS ----------
-def generate_insights(df: pd.DataFrame):
-    """
-    Sends summarized data to Gemini and returns insights text
-    """
-    model = _get_model()
+def generate_insights(df):
+    df["revenue"] = df["unit_price"] * df["quantity"]
+    df["total_cost"] = df["cost_price"] * df["quantity"]
+    df["profit"] = df["revenue"] - df["total_cost"]
 
-    summary = df.describe(include="all").fillna("").to_string()
+    insights = {}
 
-    prompt = f"""
-You are an expert business analyst.
-Analyze the following business data summary and give:
-1. Key observations
-2. Possible errors or anomalies
-3. Actionable insights
+    insights["total_revenue"] = round(df["revenue"].sum(), 2)
+    insights["total_profit"] = round(df["profit"].sum(), 2)
 
-DATA SUMMARY:
-{summary}
-"""
-
-    response = client.models.generate_content(
-    model="gemini-1.5-flash-latest",
-    contents=prompt
-
-
-    return response.text
+    if i
 
 
