@@ -1,7 +1,7 @@
 import pandas as pd
 import json
 import os
-from google import genai
+import google.generativeai as genai
 
 # ================= CONFIG =================
 API_KEY = os.getenv("GEMINI_API_KEY")
@@ -102,3 +102,4 @@ def generate_insights(df):
         ),
         "loss_products": df[df["profit"] < 0]["product_name"].unique().tolist()
     }
+
