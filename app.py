@@ -12,17 +12,21 @@ st.title("🇸🇦 Business Profit Analyst")
 
 file = st.file_uploader("Upload File", type=["xlsx", "csv"])
 
+# In app.py, replace the mapping block with this:
 if file:
     df_raw = process_business_file(file)
     if df_raw is not None:
-        # Step 1: Get Mapping
         mapping = get_header_mapping(list(df_raw.columns))
         
-        # Step 2: Rename Columns
+        # Force mapping keys to match actual columns
         df_final = df_raw.rename(columns=mapping)
         
-        # Step 3: Analyze
+        # This ensures we don't have duplicate column names which causes "sequence" errors
+        df_final = df_final.loc[:,~df_final.columns.duplicated()].copy()
+        
         metrics = generate_insights(df_final)
+        
+        # Display... (rest of your app.py code)
         
         # Step 4: Display
         c1, c2, c3 = st.columns(3)
@@ -36,3 +40,4 @@ if file:
             st.write("Current Mapped Columns:", mapping)
         else:
             st.success("✅ Analysis Complete!")
+
