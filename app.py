@@ -23,7 +23,8 @@ if uploaded_file:
         df = ai.process_business_file(uploaded_file)
 
         st.subheader("Preview Data")
-        st.dataframe(df.head())
+        st.dataframe(df, use_container_width=True, height=400)
+
 
         if st.button("Generate AI Insights"):
             with st.spinner("Analyzing with AI..."):
@@ -34,6 +35,7 @@ if uploaded_file:
 
     except Exception as e:
         st.error(str(e))
+
 
 
 
