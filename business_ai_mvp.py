@@ -25,18 +25,20 @@ def process_business_file(uploaded_file):
         else:
             df = pd.read_excel(uploaded_file)
         
+        # Clean potential numeric columns
         for col in df.columns:
             if any(k in col.lower() for k in ['price', 'cost', 'qty', 'total', 'amount', 'سعر', 'كمية']):
                 df[col] = df[col].apply(clean_numeric_value)
         return df
-    except Exception as e:
+    except Exception:
         return None
 
 def get_header_mapping(columns):
+    # Added "price" and "product" to the hints
     schema_hints = {
-        "product_name": ["product", "item", "category", "المنتج", "الصنف"],
-        "unit_price": ["price per unit", "unit price", "rate", "سعر الوحدة"],
-        "quantity": ["qty", "quantity", "count", "الكمية"],
+        "product_name": ["product", "item", "desc", "المنتج", "الصنف", "اسم"],
+        "unit_price": ["price", "rate", "sale", "سعر", "sar"],
+        "quantity": ["qty", "quantity", "count", "الكمية", "عدد"],
         "total_amount": ["total amount", "total sales", "net amount", "المجموع"],
         "cost_price": ["unit cost", "cost price", "purchase price", "التكلفة"]
     }
@@ -48,22 +50,23 @@ def get_header_mapping(columns):
         response = model.generate_content(prompt)
         mapping = json.loads(response.text.strip().replace("```json", "").replace("```", ""))
     except:
+        # Robust Local Fallback
         for col in columns:
             col_l = col.lower().strip()
             for std, hints in schema_hints.items():
-                if any(h in col_l for h in hints):
+                if any(h == col_l or h in col_l for h in hints):
                     mapping[col] = std
                     break
     return mapping
 
 def generate_insights(df):
-    # SAFETY FIX: Ensure columns are present before summing to avoid AttributeError
-    
-    # 1. Calculate Revenue
+    # 1. Calculate Revenue (Prioritize Total, then Unit Price * Qty)
     if "total_amount" in df.columns:
         total_rev = df["total_amount"].sum()
     elif "unit_price" in df.columns and "quantity" in df.columns:
         total_rev = (df["unit_price"] * df["quantity"]).sum()
+    elif "unit_price" in df.columns: # If quantity is missing, assume 1
+        total_rev = df["unit_price"].sum()
     else:
         total_rev = 0.0
 
@@ -73,14 +76,14 @@ def generate_insights(df):
     else:
         total_cost = 0.0
     
-    # Default Cost Fallback (65% COGS)
+    # 3. Default Profit Guess (65% COGS)
     is_estimated = False
     if total_cost == 0 and total_rev > 0:
         total_cost = total_rev * 0.65
         is_estimated = True
     
     total_prof = total_rev - total_cost
-    vat_amount = total_rev * 0.15 # ZATCA VAT
+    vat_amount = total_rev * 0.15 
     
     return {
         "total_revenue": round(float(total_rev), 2),
