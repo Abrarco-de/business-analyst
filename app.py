@@ -77,12 +77,13 @@ if uploaded_file:
             
             # AI Advice Trigger
             if st.button("✨ Generate AI Growth Strategy"):
-                model = genai.GenerativeModel('gemini-1.5-flash')
+                model = genai.GenerativeModel('gemini-1.5-flash-latest')
                 prompt = f"Business Revenue: {res['revenue']} SAR. Best Product: {res['best_seller']}. Give 3 specific strategies for a Saudi SME to double their profit."
                 advice = model.generate_content(prompt)
                 st.write(advice.text)
 
         st.balloons()
+
 
 
 
