@@ -21,57 +21,77 @@ def clean_numeric_value(val):
 def process_business_file(uploaded_file):
     try:
         df = pd.read_csv(uploaded_file) if uploaded_file.name.endswith('.csv') else pd.read_excel(uploaded_file)
+        # Expanded keywords to catch more column types
+        clean_keywords = ['price', 'cost', 'qty', 'quant', 'total', 'amount', 'سعر', 'كمية', 'مبلغ']
         for col in df.columns:
-            if any(k in col.lower() for k in ['price', 'cost', 'qty', 'total', 'amount', 'سعر', 'كمية']):
+            if any(k in col.lower() for k in clean_keywords):
                 df[col] = df[col].apply(clean_numeric_value)
         return df
     except Exception as e:
         return None
 
 def get_header_mapping(columns):
-    schema_hints = {
-        "product_name": ["item", "product", "category", "المنتج", "الصنف"],
-        "unit_price": ["price per unit", "unit price", "rate", "سعر الوحدة"],
-        "quantity": ["qty", "quantity", "count", "الكمية"],
-        "total_amount": ["total amount", "total sales", "net amount", "المجموع"],
-        "cost_price": ["unit cost", "cost price", "purchase price", "التكلفة"]
+    """Hybrid Mapper: Uses Local Rules first, then AI for improvement."""
+    standard_schema = {
+        "product_name": ["item", "product", "category", "desc", "المنتج", "الصنف"],
+        "unit_price": ["unit price", "price per", "rate", "سعر الوحدة", "price"],
+        "quantity": ["qty", "quantity", "count", "الكمية", "عدد"],
+        "total_amount": ["total amount", "total sales", "net amount", "المجموع", "total"],
+        "cost_price": ["unit cost", "cost price", "purchase", "التكلفة", "cost"]
     }
+    
+    # 1. Start with Local Logic (Reliable)
     mapping = {}
+    for col in columns:
+        col_l = col.lower().strip()
+        for std, hints in standard_schema.items():
+            if any(h in col_l for h in hints):
+                mapping[col] = std
+                break
+
+    # 2. Try to improve with AI (Optional)
     try:
         model = genai.GenerativeModel('gemini-1.5-flash')
-        prompt = f"Map these headers to {list(schema_hints.keys())}. Return ONLY JSON: {columns}"
+        prompt = f"Map these headers to {list(standard_schema.keys())}. Return ONLY JSON: {columns}"
         response = model.generate_content(prompt)
-        mapping = json.loads(response.text.strip().replace("```json", "").replace("```", ""))
+        ai_mapping = json.loads(response.text.strip().replace("```json", "").replace("```", ""))
+        mapping.update(ai_mapping) # AI fills in the gaps
     except:
-        for col in columns:
-            col_l = col.lower().strip()
-            for std, hints in schema_hints.items():
-                if any(h in col_l for h in hints):
-                    mapping[col] = std
-                    break
+        pass # If AI fails, we already have our local mapping
+        
     return mapping
 
 def generate_insights(df):
-    # Revenue Logic (Fixed to prevent 172M error)
+    # We use .get() but provide a Series of 0s as a fallback for math
+    zero_series = pd.Series([0] * len(df))
+    
+    # Check for Total column first (to fix the 172M error)
     if "total_amount" in df.columns and df["total_amount"].sum() > 0:
         total_rev = df["total_amount"].sum()
     else:
-        total_rev = (df.get("unit_price", 0) * df.get("quantity", 0)).sum()
+        # Fallback to Price * Qty
+        u_price = df.get("unit_price", zero_series)
+        qty = df.get("quantity", zero_series)
+        total_rev = (u_price * qty).sum()
 
-    # Cost Logic
-    total_cost = (df.get("cost_price", 0) * df.get("quantity", 0)).sum()
+    # Cost Calculation
+    c_price = df.get("cost_price", zero_series)
+    qty = df.get("quantity", zero_series)
+    total_cost = (c_price * qty).sum()
+    
+    # Default 65% cost if no cost data is found
     is_estimated = False
     if total_cost == 0:
         total_cost = total_rev * 0.65
         is_estimated = True
         
     total_prof = total_rev - total_cost
-    vat_amount = total_rev * 0.15
+    vat_amount = total_rev * 0.15 # 15% ZATCA
     
     return {
-        "total_revenue": round(total_rev, 2),
-        "total_profit": round(total_prof, 2),
-        "vat_due": round(vat_amount, 2),
-        "margin": round((total_prof / total_rev * 100), 2) if total_rev > 0 else 0,
+        "total_revenue": round(float(total_rev), 2),
+        "total_profit": round(float(total_prof), 2),
+        "vat_due": round(float(vat_amount), 2),
+        "margin": round(float((total_prof / total_rev * 100)), 2) if total_rev > 0 else 0,
         "is_estimated_cost": is_estimated
     }
