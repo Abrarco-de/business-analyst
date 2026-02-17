@@ -7,49 +7,52 @@ import google.generativeai as genai
 # 1. Page Configuration
 st.set_page_config(page_title="Visionary SME Analyst", layout="wide", page_icon="📈")
 
-# 2. Professional UI Styling (Fixes the "Invisible Text" bug)
+# 2. BULLETPROOF CSS (Fixes the White-on-White issue)
 st.markdown("""
     <style>
-    /* Main Background */
-    .stApp { background-color: #F1F5F9; }
-    
-    /* Metric Cards - Deep Navy for high contrast */
-    [data-testid="stMetric"] {
+    /* 1. Force the Metric Container to be Navy Blue */
+    [data-testid="stMetric"], .stMetric {
         background-color: #1E3A8A !important; 
         border-radius: 15px !important;
         padding: 20px !important;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.15) !important;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.2) !important;
+        border: 1px solid #2563EB !important;
     }
-    /* Metric Values (Numbers) */
-    [data-testid="stMetricValue"] {
+
+    /* 2. Force the Value (The Numbers) to be White and visible */
+    [data-testid="stMetricValue"] > div, .stMetric value {
         color: #FFFFFF !important;
         font-weight: 800 !important;
+        font-size: 2rem !important;
     }
-    /* Metric Labels (Titles) */
-    [data-testid="stMetricLabel"] {
+
+    /* 3. Force the Label (The Title) to be Light Gray */
+    [data-testid="stMetricLabel"] > div > p, .stMetric label {
         color: #CBD5E1 !important;
-        font-size: 1rem !important;
+        font-size: 1.1rem !important;
+        font-weight: 600 !important;
     }
-    /* Metric Delta (Arrows) */
-    [data-testid="stMetricDelta"] {
-        background-color: transparent !important;
+
+    /* 4. Fix the Delta (Arrows) visibility */
+    [data-testid="stMetricDelta"] > div {
+        color: #4ADE80 !important; /* Bright green */
     }
-    
-    /* Sidebar styling */
-    section[data-testid="stSidebar"] {
-        background-color: #FFFFFF !important;
+
+    /* 5. Main App Background for contrast */
+    .stApp {
+        background-color: #F8FAFC;
     }
     </style>
     """, unsafe_allow_html=True)
 
 # 3. Sidebar Configuration
-st.sidebar.title("🔐 Authentication")
+st.sidebar.title("🔐 Setup")
 api_key_input = st.sidebar.text_input("Enter Gemini API Key", type="password")
 
 if api_key_input:
     configure_ai(api_key_input)
 else:
-    st.sidebar.info("Get your key from: https://aistudio.google.com/")
+    st.sidebar.warning("⚠️ API Key required for Growth Strategy.")
 
 # 4. Main App Interface
 st.title("📈 Visionary SME Analyst")
@@ -58,28 +61,30 @@ st.markdown("##### Enterprise-grade insights for Saudi Retailers")
 uploaded_file = st.file_uploader("Upload Transaction File (CSV or Excel)", type=["csv", "xlsx"])
 
 if uploaded_file:
-    with st.spinner("Analyzing business data..."):
+    with st.spinner("Analyzing business performance..."):
         df_raw = process_business_file(uploaded_file)
         
         if df_raw is not None:
-            # Get Column Mapping
+            # Column Mapping Logic
             mapping = get_header_mapping(list(df_raw.columns))
             df_final = df_raw.rename(columns=mapping)
             
-            # Generate Business Logic
+            # Insights Engine
             res = generate_insights(df_final)
 
-            # --- ROW 1: KPI METRICS ---
+            # --- KPI METRICS ---
             st.subheader("Financial Performance")
-            m1, m2, m3, m4 = st.columns(4)
-            m1.metric("Total Revenue", f"{res['revenue']:,} SAR")
-            m2.metric("Net Profit", f"{res['profit']:,} SAR", f"{res['margin']}% Margin")
-            m3.metric("VAT Due (15%)", f"{res['vat']:,} SAR")
-            m4.metric("Data Status", "Estimated" if res['is_estimated'] else "Verified")
+            # We use a container to help the CSS apply better
+            with st.container():
+                m1, m2, m3, m4 = st.columns(4)
+                m1.metric("Total Revenue", f"{res['revenue']:,} SAR")
+                m2.metric("Net Profit", f"{res['profit']:,} SAR", f"{res['margin']}% Margin")
+                m3.metric("VAT Due (15%)", f"{res['vat']:,} SAR")
+                m4.metric("Data Status", "Estimated" if res['is_estimated'] else "Verified")
 
             st.divider()
 
-            # --- ROW 2: LEADERS ---
+            # --- LEADERS ---
             l1, l2 = st.columns(2)
             with l1:
                 st.info(f"🏆 **Best Seller (Volume)**\n\n{res['best_seller']}")
@@ -88,7 +93,7 @@ if uploaded_file:
 
             st.divider()
 
-            # --- ROW 3: VISUALS & AI ---
+            # --- CHARTS & AI ---
             chart_col, ai_col = st.columns([2, 1])
             
             with chart_col:
@@ -100,23 +105,20 @@ if uploaded_file:
                 st.subheader("AI Strategy")
                 if st.button("✨ Generate Growth Advice"):
                     if not api_key_input:
-                        st.warning("Please provide an API Key in the sidebar.")
+                        st.error("Please provide an API Key in the sidebar.")
                     else:
                         try:
-                            # Using the most stable model name
                             model = genai.GenerativeModel('gemini-1.5-flash')
-                            
                             prompt = f"""
                             Analyze this Saudi SME data:
                             - Revenue: {res['revenue']} SAR
                             - Margin: {res['margin']}%
                             - Top Product: {res['best_seller']}
                             - Most Profitable: {res['most_profitable']}
-                            
-                            Provide 3 tactical growth tips for the Saudi market.
+                            Provide 3 short tactical growth tips for the Saudi retail market.
                             """
-                            
                             response = model.generate_content(prompt)
+                            st.markdown("---")
                             st.write(response.text)
                         except Exception as e:
                             st.error(f"AI Error: {str(e)}")
