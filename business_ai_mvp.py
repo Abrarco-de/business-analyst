@@ -1,93 +1,104 @@
-import streamlit as st
 import pandas as pd
 import google.generativeai as genai
 import json
-import os
 import re
 
-# ================= 1. CONFIG =================
-# Use the latest stable 2026 model
-MODEL_ID = 'gemini-2.0-flash' 
-API_KEY = os.getenv("GEMINI_API_KEY")
+# ================= 1. AI CONFIG =================
 
-if API_KEY:
-    genai.configure(api_key=API_KEY)
-else:
-    st.error("🔑 API Key Missing")
+def configure_ai(api_key):
+    """Initializes the Gemini connection."""
+    if api_key:
+        genai.configure(api_key=api_key)
+        return True
+    return False
 
-# ================= 2. THE "MISSING" FUNCTIONS =================
+# ================= 2. DATA CLEANING =================
+
+def clean_numeric_value(val):
+    """Removes 'SAR', commas, and text so Python can do math."""
+    if pd.isna(val) or val == "": return 0.0
+    if isinstance(val, (int, float)): return float(val)
+    
+    # Remove everything except numbers and decimals
+    clean = re.sub(r'[^\d.]', '', str(val))
+    try:
+        return float(clean) if clean else 0.0
+    except:
+        return 0.0
 
 def process_business_file(uploaded_file):
-    """Reads the file and cleans currency/symbols."""
+    """Reads CSV/Excel and cleans the hidden junk."""
     try:
-        df = pd.read_csv(uploaded_file) if uploaded_file.name.endswith('.csv') else pd.read_excel(uploaded_file)
-        
-        # Strip currency symbols (SAR, $, ,) from all columns
-        def clean_num(x):
-            if isinstance(x, str):
-                res = re.sub(r'[^\d.]', '', x)
-                return float(res) if res else 0.0
-            return x
-        
-        # We clean potential numeric columns early
+        if uploaded_file.name.endswith('.csv'):
+            df = pd.read_csv(uploaded_file)
+        else:
+            df = pd.read_excel(uploaded_file)
+            
+        # Standardize numeric columns immediately
         for col in df.columns:
-            if any(k in col.lower() for k in ['price', 'cost', 'qty', 'total', 'amt']):
-                df[col] = df[col].apply(clean_num)
+            if any(k in col.lower() for k in ['price', 'cost', 'qty', 'total', 'سعر', 'كمية', 'تكلفة']):
+                df[col] = df[col].apply(clean_numeric_value)
         return df
     except Exception as e:
-        st.error(f"Error reading file: {e}")
+        print(f"File Processing Error: {e}")
         return None
 
-def get_header_mapping(columns):
-    """AI maps headers to our schema."""
-    prompt = f"Map these headers: {columns} to [transaction_id, timestamp, product_name, quantity, unit_price, cost_price]. Return ONLY JSON."
-    model = genai.GenerativeModel(MODEL_ID)
-    response = model.generate_content(prompt)
-    clean_json = response.text.strip().replace("```json", "").replace("```", "")
-    return json.loads(clean_json)
+# ================= 3. HEADER MAPPING =================
+
+def get_header_mapping(columns, model_name='gemini-1.5-flash'):
+    """
+    Maps messy POS headers to our standard schema.
+    Falls back to manual mapping if the API fails (429 error).
+    """
+    # 1. Manual Fallback Rules (Arabic & English)
+    fallback_map = {}
+    schema_hints = {
+        "product_name": ["item", "product", "desc", "المنتج", "الصنف", "اسم"],
+        "unit_price": ["price", "rate", "sale", "سعر", "بيع", "sar", "الوحدة"],
+        "quantity": ["qty", "count", "amount", "الكمية", "عدد"],
+        "cost_price": ["cost", "purchase", "buying", "تكلفة", "شراء", "التكلفة"]
+    }
+
+    # 2. Try AI First
+    try:
+        model = genai.GenerativeModel(model_name)
+        prompt = f"Map these headers: {columns} to standard keys: {list(schema_hints.keys())}. Return ONLY JSON."
+        response = model.generate_content(prompt)
+        ai_map = json.loads(response.text.strip().replace("```json", "").replace("```", ""))
+        return ai_map
+    except Exception:
+        # 3. Use Fuzzy Fallback if AI is exhausted
+        for col in columns:
+            col_lower = col.lower().strip()
+            for std_name, hints in schema_hints.items():
+                if any(h in col_lower for h in hints):
+                    fallback_map[col] = std_name
+                    break
+        return fallback_map
+
+# ================= 4. INSIGHTS ENGINE =================
 
 def generate_insights(df):
-    """Calculates Revenue, Profit, and Losses."""
-    # Logic to ensure math works even if columns are missing
-    df["revenue"] = df.get("unit_price", 0) * df.get("quantity", 0)
-    df["total_cost"] = df.get("cost_price", 0) * df.get("quantity", 0)
-    df["profit"] = df["revenue"] - df["total_cost"]
-
-    insights = {
-        "total_revenue": round(df["revenue"].sum(), 2),
-        "total_profit": round(df["profit"].sum(), 2),
-        "top_products": df.groupby("product_name")["revenue"].sum().sort_values(ascending=False).head(5).to_dict() if "product_name" in df.columns else {}
-    }
-    return insights
-
-# ================= 3. THE UI SECTION =================
-
-st.title("🇸🇦 Saudi SME Analyst")
-
-uploaded_file = st.file_uploader("Upload POS Data", type=["csv", "xlsx"])
-
-if uploaded_file:
-    # Use the functions we just defined above
-    df = process_business_file(uploaded_file)
+    """Calculates Revenue, Profit, and Margin."""
+    # Ensure math works even if columns are missing via .get()
+    rev = df.get("unit_price", 0) * df.get("quantity", 0)
+    cost = df.get("cost_price", 0) * df.get("quantity", 0)
     
-    if df is not None:
-        # AI Mapping
-        mapping = get_header_mapping(list(df.columns))
-        df = df.rename(columns=mapping)
+    # If cost is missing (common in Saudi SMEs), assume 30% margin for demo
+    if df.get("cost_price", pd.Series([0])).sum() == 0:
+        cost = rev * 0.7
+    
+    total_rev = rev.sum()
+    total_prof = (rev - cost).sum()
+    
+    insights = {
+        "total_revenue": round(total_rev, 2),
+        "total_profit": round(total_prof, 2),
+        "profit_margin_percent": 0.0
+    }
+    
+    if total_rev > 0:
+        insights["profit_margin_percent"] = round((total_prof / total_rev) * 100, 2)
         
-        # Analytics
-        stats = generate_insights(df)
-        
-        # Display Results
-        c1, c2 = st.columns(2)
-        c1.metric("Total Sales", f"{stats['total_revenue']} SAR")
-        c2.metric("Total Profit", f"{stats['total_profit']} SAR")
-        
-        if stats["top_products"]:
-            st.write("### Top Products")
-            st.bar_chart(pd.Series(stats["top_products"]))
-
-
-
-
+    return insights
 
