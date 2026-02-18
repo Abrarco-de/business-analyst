@@ -11,25 +11,27 @@ def configure_dual_engines(groq_key, mistral_key):
 def process_business_data(groq_client, df):
     df.columns = [str(c).strip() for c in df.columns]
     
-    # 1. Smart Mapping for Supermart File
+    # 1. Smart Mapping
     r_col = next((c for c in df.columns if 'Sales' in c or 'Revenue' in c), df.columns[0])
     p_col = next((c for c in df.columns if 'Profit' in c), None)
-    prod_col = next((c for c in df.columns if 'Sub Category' in c or 'Item' in c), df.columns[0])
+    # Target 'Sub Category' for this dataset specifically, then fallback
+    prod_col = next((c for c in df.columns if 'Sub Category' in c or 'Item' in c or 'Product' in c), df.columns[0])
 
-    # 2. Cleaning
+    # 2. Numeric Cleaning
     df['_rev'] = pd.to_numeric(df[r_col].astype(str).str.replace(r'[^\d.-]', '', regex=True), errors='coerce').fillna(0)
     df['_prof'] = pd.to_numeric(df[p_col].astype(str).str.replace(r'[^\d.-]', '', regex=True), errors='coerce').fillna(0)
     
-    # 3. Product Analysis (The "Data Exchange" Fix)
+    # 3. Aggregation & Sorting
     prod_stats = df.groupby(prod_col).agg({'_rev': 'sum', '_prof': 'sum'})
     prod_stats['margin'] = (prod_stats['_prof'] / prod_stats['_rev'] * 100).fillna(0)
 
-    # We find the absolute extremes instead of using a 10% filter
-    least_margin_item = prod_stats['margin'].idxmin()
-    least_margin_val = prod_stats['margin'].min()
-    
-    best_margin_item = prod_stats['margin'].idxmax()
-    best_margin_val = prod_stats['margin'].max()
+    # CREATE SORTED LISTS
+    top_5_margin = prod_stats.sort_values('margin', ascending=False).head(5)
+    bot_5_margin = prod_stats.sort_values('margin', ascending=True).head(5)
+
+    # Format for Data Exchange
+    top_str = ", ".join([f"{n} ({v:.2f}%)" for n, v in top_5_margin['margin'].items()])
+    bot_str = ", ".join([f"{n} ({v:.2f}%)" for n, v in bot_5_margin['margin'].items()])
 
     metrics = {
         "total_revenue": round(df['_rev'].sum(), 2),
@@ -39,27 +41,24 @@ def process_business_data(groq_client, df):
         "avg_transaction": round(df['_rev'].mean(), 2),
         "total_units": len(df),
         "rev_per_unit": round(df['_rev'].mean(), 2),
-        "top_rev_prods": prod_stats['_rev'].nlargest(3).index.tolist(),
-        "top_prof_prods": prod_stats['_prof'].nlargest(3).index.tolist(),
-        # NEW: Absolute Extreme Data Exchange
-        "least_margin_name": f"{least_margin_item} ({least_margin_val:.1f}%)",
-        "best_margin_name": f"{best_margin_item} ({best_margin_val:.1f}%)",
-        "loss_making": prod_stats[prod_stats['_prof'] < 0].index.tolist(),
-        "low_margin": prod_stats.nsmallest(3, 'margin').index.tolist() # Gives bottom 3 always
+        # DATA EXCHANGE FIELDS
+        "top_margin_list": top_str,
+        "bot_margin_list": bot_str,
+        "top_margin_item": top_5_margin.index[0],
+        "bot_margin_item": bot_5_margin.index[0]
     }
     return metrics, df
 
 def get_ai_response(mistral_client, metrics, user_query):
-    # This context now GUARANTEES the AI knows the answer
+    # Pass the EXACT sorted values to the AI
     context = f"""
-    SME DATA:
-    - Absolute Lowest Margin: {metrics['least_margin_name']}
-    - Absolute Highest Margin: {metrics['best_margin_name']}
-    - Top Revenue Items: {metrics['top_rev_prods']}
+    BUSINESS INTEL:
+    - HIGHEST MARGIN PRODUCTS (Sorted): {metrics['top_margin_list']}
+    - LEAST MARGIN PRODUCTS (Sorted): {metrics['bot_margin_list']}
     - Total Profit: {metrics['total_profit']} SAR
     """
     
-    prompt = f"{context}\n\nQuestion: {user_query}\n\nTask: Answer briefly using the exact names above."
+    prompt = f"{context}\n\nUser Question: {user_query}\n\nTask: Use the sorted lists above to give a specific answer. Be brief (2 sentences)."
     
     try:
         res = mistral_client.chat.complete(model="mistral-large-latest", messages=[{"role": "user", "content": prompt}])
