@@ -80,7 +80,8 @@ if file:
                         else:
                             st.error("AI connection error. Try again shortly.")
                 else:
-                    st.warning("Ensure data is correct and API key is set.")d
+                    st.warning("Ensure data is correct and API key is set.")
+
 
 
 
