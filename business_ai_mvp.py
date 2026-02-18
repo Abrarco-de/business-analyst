@@ -8,95 +8,88 @@ import re
 def configure_engines(gemini_key, groq_key):
     try:
         genai.configure(api_key=gemini_key)
-        groq_client = Groq(api_key=groq_key)
-        return groq_client
-    except Exception:
-        return None
+        return Groq(api_key=groq_key)
+    except: return None
 
 def process_business_file(uploaded_file):
     try:
-        if uploaded_file.name.endswith('.csv'):
-            df = pd.read_csv(uploaded_file, encoding='latin1')
-        else:
-            df = pd.read_excel(uploaded_file)
+        df = pd.read_csv(uploaded_file, encoding='latin1') if uploaded_file.name.endswith('.csv') else pd.read_excel(uploaded_file)
+        # Standardize headers: No BOM, No extra spaces
         df.columns = [str(c).replace('ï»¿', '').strip() for c in df.columns]
         return df
-    except:
-        return None
+    except: return None
 
 def gemini_get_schema(columns):
-    """Uses Gemini to identify column roles with a strict filter against IDs."""
+    """Uses Gemini to identify roles, with strict instructions to avoid IDs."""
     try:
         model = genai.GenerativeModel('gemini-1.5-flash')
         prompt = f"""
-        Analyze these columns: {list(columns)}
-        
-        Identify the correct column names for these roles. 
-        CRITICAL RULE: For 'product_col', you MUST choose a descriptive column like 'Category', 'Sub Category', or 'Product'. 
-        NEVER choose 'Order ID', 'Transaction ID', or any column containing 'ID', 'Date', or 'Time'.
-        
-        Return ONLY a valid JSON:
+        Columns: {list(columns)}
+        Identify the BEST matching column for these roles. 
+        RULES:
+        - 'product_col': MUST be a category or item name (e.g., 'Product', 'Category'). NEVER choose an ID or Transaction number.
+        - 'revenue_col': The total sales amount. If no total column exists, return 'None'.
+        - 'profit_col': The profit column. If missing, return 'None'.
+        Return ONLY valid JSON:
         {{
-            "product_col": "exact name of product or category column",
-            "revenue_col": "exact name of total sales/revenue column (or 'None')",
-            "profit_col": "exact name of profit column (or 'None')",
-            "price_col": "exact name of unit price column",
-            "qty_col": "exact name of quantity column"
+            "product_col": "string",
+            "revenue_col": "string or 'None'",
+            "profit_col": "string or 'None'",
+            "price_col": "string or 'None'",
+            "qty_col": "string or 'None'"
         }}
         """
         response = model.generate_content(prompt)
         json_match = re.search(r'\{.*\}', response.text, re.DOTALL)
-        if json_match:
-            schema = json.loads(json_match.group())
-            # Secondary Safety Check: If AI still picked an ID, manually override
-            p_low = schema['product_col'].lower()
-            if 'id' in p_low or 'transaction' in p_low or 'order' in p_low:
-                raise ValueError("AI picked an ID column")
-            return schema
-        return None
-    except:
-        # ULTIMATE FALLBACK: Search for keywords manually if AI fails
-        cols_list = list(columns)
-        cols_lower = [c.lower() for c in cols_list]
-        
-        # Priority list for Product Column
-        p_col = cols_list[0]
-        for target in ['category', 'product', 'sub category', 'item', 'description']:
-            for i, name in enumerate(cols_lower):
-                if target in name and 'id' not in name:
-                    p_col = cols_list[i]
-                    break
-            else: continue
-            break
-            
-        return {
-            "product_col": p_col,
-            "revenue_col": cols_list[cols_lower.index('sales')] if 'sales' in cols_lower else "None",
-            "profit_col": cols_list[cols_lower.index('profit')] if 'profit' in cols_lower else "None",
-            "price_col": "None",
-            "qty_col": "None"
-        }
+        return json.loads(json_match.group())
+    except: return None
 
 def calculate_precise_metrics(df, schema):
-    def to_f(c):
-        if not c or c not in df.columns or c == "None": 
-            return pd.Series([0.0]*len(df))
-        return pd.to_numeric(df[c].astype(str).str.replace(r'[^\d.]', '', regex=True), errors='coerce').fillna(0.0)
-
-    # 1. Revenue
-    if schema.get("revenue_col") and schema["revenue_col"] != "None":
-        df['_rev'] = to_f(schema["revenue_col"])
-    else:
-        df['_rev'] = to_f(schema.get("price_col")) * to_f(schema.get("qty_col"))
-
-    # 2. Profit
-    if schema.get("profit_col") and schema["profit_col"] != "None":
-        df['_prof'] = to_f(schema["profit_col"])
-    else:
-        df['_prof'] = df['_rev'] * 0.25 
-
-    p_col = schema.get("product_col", df.columns[0])
+    """Robust math that handles missing columns and text in numbers."""
     
+    def get_col_safe(key_name):
+        """Finds the column name even if case is different."""
+        target = schema.get(key_name, "None")
+        if not target or target == "None": return None
+        # Case-insensitive match
+        for actual_col in df.columns:
+            if actual_col.lower() == target.lower():
+                return actual_col
+        return None
+
+    def to_numeric_series(col_name):
+        if not col_name: return pd.Series([0.0]*len(df))
+        # Remove commas, currency symbols, and spaces, then convert
+        clean_s = df[col_name].astype(str).str.replace(r'[^\d.-]', '', regex=True)
+        return pd.to_numeric(clean_s, errors='coerce').fillna(0.0)
+
+    # 1. Identify Product Column (Filtering IDs)
+    p_col = get_col_safe("product_col")
+    if not p_col or any(x in p_col.lower() for x in ['id', 'number', 'transaction']):
+        # Fallback search for a better category column
+        for c in df.columns:
+            if any(x in c.lower() for x in ['product', 'category', 'item', 'type']) and 'id' not in c.lower():
+                p_col = c
+                break
+        if not p_col: p_col = df.columns[0]
+
+    # 2. Calculate Revenue
+    rev_col = get_col_safe("revenue_col")
+    if rev_col:
+        df['_rev'] = to_numeric_series(rev_col)
+    else:
+        # Fallback to Price * Qty
+        p_price = get_col_safe("price_col")
+        p_qty = get_col_safe("qty_col")
+        df['_rev'] = to_numeric_series(p_price) * to_numeric_series(p_qty)
+
+    # 3. Calculate Profit
+    prof_col = get_col_safe("profit_col")
+    if prof_col:
+        df['_prof'] = to_numeric_series(prof_col)
+    else:
+        df['_prof'] = df['_rev'] * 0.25 # 25% Margin Estimate
+
     metrics = {
         "rev": round(df['_rev'].sum(), 2),
         "prof": round(df['_prof'].sum(), 2),
@@ -112,11 +105,10 @@ def groq_get_insights(client, metrics):
         completion = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[
-                {"role": "system", "content": "You are a senior SME Business Consultant in Saudi Arabia."},
-                {"role": "user", "content": f"Revenue: {metrics['rev']} SAR. Profit: {metrics['prof']} SAR. Top Product: {metrics['best_seller']}. Most Profitable: {metrics['top_profit_prod']}. 3 Tips."}
+                {"role": "system", "content": "You are a senior Saudi Business Consultant. Provide 3 high-level growth tips."},
+                {"role": "user", "content": f"Data: Revenue {metrics['rev']} SAR, Profit {metrics['prof']}, Top Item {metrics['best_seller']}. Recommend strategies."}
             ],
             temperature=0.5,
         )
         return completion.choices[0].message.content
-    except Exception as e:
-        return f"Consultant unavailable: {str(e)}"
+    except: return "Consultant currently analyzing data..."
