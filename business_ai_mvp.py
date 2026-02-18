@@ -268,7 +268,7 @@ Focus on:
         return response.text.strip()
     except Exception:
         return "AI insight generation failed."
- def resolve_columns(df):
+  def resolve_columns(df):
     resolved = {}
     cols = [c.lower().strip() for c in df.columns]
 
@@ -278,8 +278,9 @@ Focus on:
                 resolved[canonical] = df.columns[i]
                 break
 
-    return resolved
-S       
+      return resolved
+     
+
 
 
 
