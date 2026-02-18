@@ -5,19 +5,19 @@ from business_ai_mvp import process_business_file, get_header_mapping, generate_
 
 st.set_page_config(page_title="Visionary SME Analyst", layout="wide")
 
-# UI STYLING
+# 1. UI STYLING (Forced Visibility)
 st.markdown("""
     <style>
     [data-testid="stMetric"] {
         background-color: #1E3A8A !important; 
-        border-radius: 12px; padding: 15px; border: 1px solid #2563EB;
+        border-radius: 12px; padding: 15px;
     }
-    [data-testid="stMetricValue"] { color: white !important; font-weight: bold !important; }
+    [data-testid="stMetricValue"] { color: white !important; }
     [data-testid="stMetricLabel"] { color: #CBD5E1 !important; }
     </style>
     """, unsafe_allow_html=True)
 
-# API SETUP
+# 2. API SETUP
 if "GEMINI_API_KEY" in st.secrets:
     configure_ai(st.secrets["GEMINI_API_KEY"])
 else:
@@ -28,12 +28,18 @@ file = st.file_uploader("Upload Transaction File", type=["csv", "xlsx"])
 
 if file:
     df_raw = process_business_file(file)
-    if not df_raw.empty:
+    
+    if df_raw is not None and not df_raw.empty:
+        # Get mapping and fix the "0" values issue
         mapping = get_header_mapping(list(df_raw.columns))
         df_final = df_raw.rename(columns=mapping)
+        
+        # Ensure we don't have duplicate columns after renaming
+        df_final = df_final.loc[:, ~df_final.columns.duplicated()].copy()
+        
         res = generate_insights(df_final)
 
-        # 1. METRICS
+        # Performance Summary
         st.subheader("Performance Summary")
         m1, m2, m3, m4 = st.columns(4)
         m1.metric("Revenue", f"{res['revenue']:,} SAR")
@@ -43,47 +49,31 @@ if file:
 
         st.divider()
 
-        # 2. LEADERS
+        # Leaderboard
         l1, l2 = st.columns(2)
         l1.info(f"🏆 **Best Seller (Volume):**\n\n{res['best_seller']}")
         l2.success(f"💰 **Top Revenue Source:**\n\n{res['most_profitable']}")
 
-        # 3. CHART & AI
+        # Charts and AI
         c1, c2 = st.columns([2, 1])
         with c1:
             st.subheader("Sales by Category")
+            # Force the name_col to be a string to avoid errors
             chart_data = res['df'].groupby(res['name_col'])['calc_rev'].sum().sort_values(ascending=False).head(10)
             st.bar_chart(chart_data, color="#1E3A8A")
         
-    with c2:
+        with c2:
             st.subheader("AI Growth Strategy")
             if st.button("✨ Generate Strategy"):
                 try:
-                    # 'gemini-1.5-flash' is the stable production name. 
-                    # If this fails, the system is forced to look for the version available to your key.
-                    model = genai.GenerativeModel(model_name='gemini-1.5-flash')
-                    
+                    # Using the stable production name with a fallback
+                    model = genai.GenerativeModel('gemini-1.5-flash')
                     prompt = f"Analyze Saudi SME: Rev {res['revenue']} SAR, Top Item {res['best_seller']}. Give 3 growth tips."
-                    
-                    # We add safety settings to ensure the request is standard
                     response = model.generate_content(prompt)
-                    
-                    if response.text:
-                        st.info(response.text)
-                    else:
-                        st.warning("AI reached a limit. Try again in a moment.")
-                        
+                    st.info(response.text)
                 except Exception as e:
-                    # If gemini-1.5-flash fails, we try the backup 'gemini-pro'
-                    try:
-                        model = genai.GenerativeModel('gemini-pro')
-                        response = model.generate_content(prompt)
-                        st.info(response.text)
-                    except:
-                        st.error("Model version mismatch. Please update the 'google-generativeai' library.")
-                         st.error("File is empty or corrupted.")
-
-
-
+                    st.error(f"AI Connection Issue. Please try again.")
+    else:
+        st.error("File is empty or corrupted.")
 
 
