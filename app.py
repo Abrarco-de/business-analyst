@@ -1,141 +1,89 @@
 import streamlit as st
 import pandas as pd
-import plotly.express as px # Requires: pip install plotly
-
-# Import the engine
+import plotly.express as px
 from business_ai_mvp import configure_dual_engines, process_business_data, get_ai_response
 
-# 1. PAGE SETUP
-st.set_page_config(page_title="Visionary SME AI", layout="wide", page_icon="📊")
+# Page Config
+st.set_page_config(page_title="Visionary SME AI", layout="wide", page_icon="📈")
 
-# Initialize Session State
-if "metrics" not in st.session_state: st.session_state.metrics = None
-if "df_processed" not in st.session_state: st.session_state.df_processed = None
-if "chat_history" not in st.session_state: st.session_state.chat_history = []
+# 1. SESSION STATE
+if "m" not in st.session_state: st.session_state.m = None
+if "chat" not in st.session_state: st.session_state.chat = []
 
-# 2. SIDEBAR CONFIG
-with st.sidebar:
-    st.title("⚙️ Data Settings")
-    g_key = st.secrets.get("GROQ_API_KEY")
-    m_key = st.secrets.get("MISTRAL_API_KEY")
-    g_client, m_client = configure_dual_engines(g_key, m_key)
-    
-    uploaded_file = st.file_uploader("Upload Finance/Sales Data", type=["csv", "xlsx"])
-    
-    if st.button("🔄 Reset Dashboard"):
-        st.session_state.metrics = None
-        st.session_state.df_processed = None
-        st.session_state.chat_history = []
+# API Init
+g_key, m_key = st.secrets.get("GROQ_API_KEY"), st.secrets.get("MISTRAL_API_KEY")
+g_client, m_client = configure_dual_engines(g_key, m_key)
+
+st.title("📊 Enterprise BI Dashboard")
+
+# 2. FILE UPLOADER
+if st.session_state.m is None:
+    st.info("👋 Welcome! Please upload your Sales/Finance data (CSV or Excel).")
+    up = st.file_uploader("Upload Data", type=["csv", "xlsx"])
+    if up:
+        raw = pd.read_csv(up) if up.name.endswith('csv') else pd.read_excel(up)
+        with st.spinner("Analyzing Data..."):
+            metrics, _ = process_business_data(g_client, raw)
+            if "error" in metrics:
+                st.error(metrics["error"])
+            else:
+                st.session_state.m = metrics
+                st.rerun()
+else:
+    if st.sidebar.button("🗑️ Reset All Data"):
+        st.session_state.m = None
+        st.session_state.chat = []
         st.rerun()
 
-# 3. DATA PROCESSING ORCHESTRATOR
-if uploaded_file and st.session_state.metrics is None:
-    try:
-        # Load Raw
-        if uploaded_file.name.endswith('csv'):
-            df_raw = pd.read_csv(uploaded_file)
-        else:
-            df_raw = pd.read_excel(uploaded_file)
-            
-        with st.spinner("🔍 detecting schema & calculating metrics..."):
-            # Call the Engine
-            metrics, df_proc = process_business_data(g_client, df_raw)
-            
-            # Error Check
-            if metrics.get("error"):
-                st.error(f"Data Processing Failed: {metrics['error']}")
-            else:
-                st.session_state.metrics = metrics
-                st.session_state.df_processed = df_proc
-                st.rerun() # Refresh to show dashboard
-                
-    except Exception as e:
-        st.error(f"Critical Error: {str(e)}")
-
-# 4. MAIN DASHBOARD RENDER
-st.title("📊 Enterprise Business Intelligence")
-
-if st.session_state.metrics:
-    m = st.session_state.metrics
+# 3. DASHBOARD UI
+if st.session_state.m:
+    m = st.session_state.m
     meta = m['meta']
-
-    # --- ROW 1: KPI CARDS ---
-    st.markdown("### 🏦 Financial Performance")
-    k1, k2, k3, k4, k5 = st.columns(5)
     
-    k1.metric("Total Revenue", f"{m['total_revenue']:,.0f} SAR")
+    # Row 1: KPI Metrics
+    st.subheader("💰 Financial Status")
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("Total Revenue", f"{m['revenue']:,} SAR")
     
-    # Conditional Formatting for Profit (Warn if Estimated)
-    prof_label = "Total Profit"
-    if not meta['has_real_profit']: prof_label += " (Est. 20%)"
-    k2.metric(prof_label, f"{m['total_profit']:,.0f} SAR")
+    # Label profit clearly if estimated
+    p_label = "Total Profit" if meta['real_profit'] else "Estimated Profit (20%)"
+    k2.metric(p_label, f"{m['profit']:,} SAR")
     
-    k3.metric("Gross Margin", f"{m['gross_margin_pct']}%")
-    k4.metric("Avg Order Value", f"{m['avg_order_value']:,.1f} SAR")
-    
-    # Handle Optional Quantity
-    if m['total_units']:
-        k5.metric("Total Units", f"{m['total_units']:,}")
-    else:
-        k5.metric("Total Units", "N/A", help="No Quantity column found")
+    k3.metric("Gross Margin", f"{m['margin_pct']}%")
+    k4.metric("VAT (15%)", f"{m['vat']:,} SAR")
 
     st.divider()
 
-    # --- ROW 2: DEEP INSIGHTS ---
-    c1, c2 = st.columns([1, 1])
-    
-    with c1:
-        st.subheader("📉 Margin Analysis")
-        st.caption("Lowest Margin Products (Potential Loss Makers)")
-        # Parse the string we built in the engine for display
-        items = m['lowest_margin_str'].split(", ")
-        for item in items:
+    # Row 2: Sorted Tables (The "Least Margin" Request)
+    col_a, col_b = st.columns(2)
+    with col_a:
+        st.markdown("### 📉 Weakest Margins (Sorted)")
+        for item in m['bot_margin_items']:
             st.error(item)
             
-    with c2:
-        st.subheader("📈 Revenue Drivers")
-        st.caption("Top Products by Sales Volume")
-        for item in m['top_revenue_items']:
+    with col_b:
+        st.markdown("### 📈 Strongest Margins (Sorted)")
+        for item in m['top_margin_items']:
             st.success(item)
 
-    # --- ROW 3: TREND ANALYSIS (Conditional) ---
-    if meta['has_date'] and m['trend_data']:
+    # Row 3: Trend Chart (Conditional)
+    if m['trend_data']:
         st.divider()
-        st.subheader("📅 Sales Trend Over Time")
-        trend_df = pd.DataFrame(list(m['trend_data'].items()), columns=['Date', 'Revenue'])
-        fig = px.line(trend_df, x='Date', y='Revenue', title="Revenue Timeline")
+        st.subheader("📅 Revenue Trend Over Time")
+        tdf = pd.DataFrame(m['trend_data'].items(), columns=['Date', 'Revenue'])
+        fig = px.line(tdf, x='Date', y='Revenue', markers=True, template="plotly_white")
         st.plotly_chart(fig, use_container_width=True)
     else:
-        st.info("💡 Note: No Date column detected, so Trend Analysis is hidden.")
+        st.info("💡 Note: No valid date column found to generate trend chart.")
 
-    # --- 5. FLOATING AI CHAT ---
-    st.markdown("""<style>.stPopover {position: fixed; bottom: 30px; right: 30px; z-index:999;}</style>""", unsafe_allow_html=True)
-    
-    with st.popover("🤖 Consultant AI"):
-        st.caption("Ask specific questions about your data context.")
-        
-        # Chat History
-        for msg in st.session_state.chat_history:
-            role = "user" if msg["role"] == "user" else "assistant"
-            with st.chat_message(role): st.write(msg["content"])
+    # 4. CHAT POPOVER
+    st.markdown("""<style>.stPopover {position: fixed; bottom: 30px; right: 30px;}</style>""", unsafe_allow_html=True)
+    with st.popover("💬 Chat with AI"):
+        for msg in st.session_state.chat:
+            with st.chat_message(msg["role"]): st.write(msg["content"])
             
-        # Input
-        if query := st.chat_input("Ex: Why is margin so low?"):
-            st.session_state.chat_history.append({"role": "user", "content": query})
-            with st.chat_message("user"): st.write(query)
-            
-            with st.spinner("Analyzing metrics..."):
-                ans = get_ai_response(m_client, m, query)
-                
-            with st.chat_message("assistant"): st.write(ans)
-            st.session_state.chat_history.append({"role": "assistant", "content": ans})
-
-elif not uploaded_file:
-    # Empty State
-    st.markdown("""
-    <div style='text-align: center; padding: 50px;'>
-        <h2>👋 Welcome to Visionary SME AI</h2>
-        <p>Please upload your <b>Sales or Finance CSV/Excel</b> from the sidebar.</p>
-        <p style='color: gray; font-size: 0.9em;'>Supports: Supermart, POS Reports, Standard Ledgers</p>
-    </div>
-    """, unsafe_allow_html=True)
+        if p := st.chat_input("Ask about your performance..."):
+            st.session_state.chat.append({"role": "user", "content": p})
+            ans = get_ai_response(m_client, m, p)
+            st.session_state.chat.append({"role": "assistant", "content": ans})
+            st.rerun()
