@@ -26,23 +26,22 @@ def process_business_file(uploaded_file):
         return pd.DataFrame() # Return empty instead of None
 
 def get_header_mapping(columns):
-    """Maps messy headers to standard names."""
     standard_schema = {
-        "product_name": ["item", "product", "category", "sub", "المنتج", "الصنف", "type"],
-        "unit_price": ["price per unit", "unit price", "rate", "سعر الوحدة", "price"],
-        "quantity": ["qty", "quantity", "count", "الكمية", "units"],
-        "total_amount": ["total amount", "total sales", "net amount", "المجموع", "total"],
+        # Added 'category' and 'sub' here to catch your specific columns
+        "product_name": ["item", "product", "category", "sub", "المنتج", "الصنف", "type", "description"],
+        "unit_price": ["price per unit", "unit price", "rate", "سعر الوحدة", "price", "unit_price"],
+        "quantity": ["qty", "quantity", "count", "الكمية", "units", "amount"],
+        "total_amount": ["total amount", "total sales", "net amount", "المجموع", "total", "sales", "revenue"],
         "cost_price": ["unit cost", "cost price", "purchase", "التكلفة", "cost"]
     }
     mapping = {}
     for col in columns:
-        col_l = str(col).lower().strip()
+        col_l = str(col).lower().strip().replace(" ", "_") # Clean the column name
         for std, hints in standard_schema.items():
             if any(h in col_l for h in hints):
                 mapping[col] = std
                 break
     return mapping
-
 def generate_insights(df):
     """The engine that cleans and analyzes everything."""
     try:
@@ -101,3 +100,4 @@ def generate_insights(df):
         }
     except Exception as e:
         return {"revenue": 0, "profit": 0, "margin": 0, "vat": 0, "best_seller": "Error", "most_profitable": "Error", "is_estimated": True, "df": df, "name_col": "N/A"}
+
