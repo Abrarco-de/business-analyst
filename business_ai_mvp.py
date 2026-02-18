@@ -1,23 +1,47 @@
 import pandas as pd
-import numpy as np
 
-# -----------------------------
-# Load & clean business data
-# -----------------------------
-def process_business_file(file):
-    if file.name.endswith(".csv"):
-        df = pd.read_csv(file)
+# ---------- COLUMN ALIASES ----------
+COLUMN_MAP = {
+    "product_name": ["product", "item", "item_name", "product_name", "menu_item", "description", "name"],
+    "quantity": ["qty", "quantity", "count", "units", "sold_qty"],
+    "unit_price": ["price", "unit_price", "selling_price", "rate", "amount"],
+    "cost_price": ["cost", "cost_price", "buy_price", "purchase_price"],
+    "timestamp": ["date", "time", "timestamp", "created_at", "sale_date"]
+}
+
+# ---------- UTIL ----------
+def find_column(df, possible_names):
+    for col in df.columns:
+        if col.lower().strip() in possible_names:
+            return col
+    return None
+
+# ---------- CORE ----------
+def process_business_file(uploaded_file):
+    if uploaded_file.name.endswith(".csv"):
+        df = pd.read_csv(uploaded_file)
     else:
-        df = pd.read_excel(file)
+        df = pd.read_excel(uploaded_file)
 
-    # Normalize column names
-    df.columns = [c.strip().lower().replace(" ", "_") for c in df.columns]
+    df.columns = [c.lower().strip() for c in df.columns]
 
-    required = ["product_name", "quantity", "unit_price", "cost_price"]
+    schema = {}
+    for standard, aliases in COLUMN_MAP.items():
+        found = find_column(df, aliases)
+        if found:
+            schema[standard] = found
 
-    for col in required:
-        if col not in df.columns:
-            raise ValueError(f"Missing column: {col}")
+    if "unit_price" not in schema or "quantity" not in schema:
+        raise ValueError("File must contain at least price and quantity columns")
+
+    df = df.rename(columns={v: k for k, v in schema.items()})
+
+    # Defaults if missing
+    if "product_name" not in df:
+        df["product_name"] = "Unknown Item"
+
+    if "cost_price" not in df:
+        df["cost_price"] = 0
 
     df["quantity"] = pd.to_numeric(df["quantity"], errors="coerce").fillna(0)
     df["unit_price"] = pd.to_numeric(df["unit_price"], errors="coerce").fillna(0)
@@ -25,19 +49,15 @@ def process_business_file(file):
 
     return df
 
-
-# -----------------------------
-# Business analytics engine
-# -----------------------------
+# ---------- ANALYTICS ----------
 def generate_insights(df):
-    df["revenue"] = df["quantity"] * df["unit_price"]
-    df["cost"] = df["quantity"] * df["cost_price"]
+    df["revenue"] = df["unit_price"] * df["quantity"]
+    df["cost"] = df["cost_price"] * df["quantity"]
     df["profit"] = df["revenue"] - df["cost"]
 
     total_revenue = round(df["revenue"].sum(), 2)
     total_profit = round(df["profit"].sum(), 2)
-    margin = round((total_profit / total_revenue) * 100, 2) if total_revenue else 0
-
+    margin = round((total_profit / total_revenue * 100), 2) if total_revenue else 0
     vat = round(total_revenue * 0.15, 2)
 
     top_products = (
@@ -45,6 +65,7 @@ def generate_insights(df):
         .sum()
         .sort_values(ascending=False)
         .head(5)
+        .reset_index()
     )
 
     loss_products = (
@@ -52,6 +73,7 @@ def generate_insights(df):
         .sum()
         .sort_values()
         .head(5)
+        .reset_index()
     )
 
     return {
