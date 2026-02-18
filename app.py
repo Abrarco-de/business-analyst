@@ -58,14 +58,28 @@ if file:
         with c2:
             st.subheader("AI Growth Strategy")
             if st.button("✨ Generate Strategy"):
+                # Use the 'latest' stable alias which works across most regions
                 try:
-                    # Using the latest stable model
-                    model = genai.GenerativeModel('gemini-1.5-flash')
-                    prompt = f"Business Revenue {res['revenue']} SAR. Best product {res['best_seller']}. Give 3 growth tips."
-                    response = model.generate_content(prompt)
-                    st.write(response.text)
+                    # Check if key exists
+                    if "GEMINI_API_KEY" not in st.secrets:
+                        st.error("API Key not found in Secrets!")
+                    else:
+                        # Force use of v1 stable model
+                        model = genai.GenerativeModel('gemini-1.5-flash') 
+                        
+                        prompt = f"""
+                        Acting as a Saudi Business Consultant, analyze:
+                        Total Revenue: {res['revenue']} SAR
+                        Product Performance: {res['best_seller']} is the top item.
+                        Provide 3 professional growth tips for this SME.
+                        """
+                        
+                        response = model.generate_content(prompt)
+                        st.info(response.text)
                 except Exception as e:
-                    st.error("AI currently unavailable.")
+                    # This will show you the ACTUAL error so we can fix it
+                    st.error(f"AI Error: {str(e)}")
     else:
         st.error("File is empty or corrupted.")
+
 
