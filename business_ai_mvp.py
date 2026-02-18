@@ -13,22 +13,28 @@ def configure_engines(gemini_key, groq_key):
 
 # --- 2. ADVANCED COLUMN MAPPING ---
 SCHEMA_MAP = {
-    "product_col": ["Product", "Category", "Item", "Sub Category", "Description"],
-    "revenue_col": ["Sales", "Total Amount", "Revenue", "Amount", "Subtotal"],
-    "profit_col": ["Profit", "Margin", "Earnings", "Net Profit"],
-    "price_col": ["Price", "Unit Price", "Rate"],
-    "qty_col": ["Quantity", "Qty", "Count"]
+    "product_col": ["Product", "Category", "Item", "Sub Category", "Description", "Product Name", "Product Category"],
+    "revenue_col": ["Sales", "Total Amount", "Revenue", "Amount", "Subtotal", "Total Sales"],
+    "profit_col": ["Profit", "Margin", "Earnings", "Net Profit", "Gain"],
+    "price_col": ["Price", "Unit Price", "Rate", "Price per Unit"],
+    "qty_col": ["Quantity", "Qty", "Count", "Units Sold"]
 }
+
+def clean_column_names(df):
+    df.columns = [str(c).strip().replace('ï»¿', '') for c in df.columns]
+    return df
 
 def find_best_column(actual_cols, target_key):
     possible_names = SCHEMA_MAP.get(target_key, [])
+    # Direct Match
     for name in possible_names:
         for col in actual_cols:
             if col.lower() == name.lower(): return col
     # Fuzzy Match
     for name in possible_names:
         matches = difflib.get_close_matches(name.lower(), [c.lower() for c in actual_cols], n=1, cutoff=0.8)
-        if matches: return next(c for c in actual_cols if c.lower() == matches[0])
+        if matches:
+            return next(c for c in actual_cols if c.lower() == matches[0])
     return None
 
 def robust_numeric(df, col_name):
@@ -36,43 +42,12 @@ def robust_numeric(df, col_name):
     clean = df[col_name].astype(str).str.replace(r'[^\d.-]', '', regex=True)
     return pd.to_numeric(clean, errors='coerce').fillna(0.0)
 
-# --- 3. THE INTELLIGENCE BRIDGE (Gemini + Groq) ---
-def get_intelligent_answer(groq_client, df, user_query, metrics):
-    try:
-        # Agent 1: Gemini (The Researcher) scans the full dataframe
-        model = genai.GenerativeModel('gemini-1.5-flash')
-        research_prompt = f"""
-        Analyze this user query: "{user_query}" 
-        Based on the columns {list(df.columns)} and a sample of the data:
-        {df.head(5).to_string()}
-        
-        Tasks:
-        1. Search the dataset for relevant facts (specific products, dates, or cities mentioned).
-        2. Provide specific totals or averages related to the query.
-        3. If the query is general, provide a breakdown of the top 3 items.
-        Return ONLY a concise Fact Sheet.
-        """
-        research_response = model.generate_content(research_prompt)
-        fact_sheet = research_response.text
-
-        # Agent 2: Groq (The Strategic Consultant)
-        analysis = groq_client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[
-                {"role": "system", "content": "You are a Saudi Business Consultant. Use the provided Fact Sheet to give a specific, data-backed answer. No generic advice."},
-                {"role": "user", "content": f"Fact Sheet: {fact_sheet}\n\nMetrics: Rev {metrics['rev']}, Prof {metrics['prof']}\nQuestion: {user_query}"}
-            ],
-            temperature=0.2
-        )
-        return analysis.choices[0].message.content
-    except Exception as e:
-        return f"AI Bridge Error: {str(e)}"
-
-# --- 4. METRIC CALCULATION ---
+# --- 3. METRIC CALCULATION (The Foundation) ---
 def calculate_precise_metrics(df):
-    df.columns = [str(c).strip().replace('ï»¿', '') for c in df.columns]
+    df = clean_column_names(df)
     cols = df.columns
     
+    # Identify Columns
     p_col = find_best_column(cols, "product_col")
     r_col = find_best_column(cols, "revenue_col")
     prof_col = find_best_column(cols, "profit_col")
@@ -80,22 +55,92 @@ def calculate_precise_metrics(df):
     q_col = find_best_column(cols, "qty_col")
 
     # Revenue Logic
-    if r_col: df['_rev'] = robust_numeric(df, r_col)
-    else: df['_rev'] = robust_numeric(df, pr_col) * robust_numeric(df, q_col)
+    if r_col:
+        df['_rev'] = robust_numeric(df, r_col)
+    else:
+        df['_rev'] = robust_numeric(df, pr_col) * robust_numeric(df, q_col)
 
     # Profit Logic
-    if prof_col: df['_prof'] = robust_numeric(df, prof_col)
-    else: df['_prof'] = df['_rev'] * 0.20
+    if prof_col:
+        df['_prof'] = robust_numeric(df, prof_col)
+    else:
+        df['_prof'] = df['_rev'] * 0.20 # 20% fallback margin
 
+    # Ensure a valid product column (reject IDs)
     final_p = p_col if p_col and 'id' not in p_col.lower() else cols[0]
 
     metrics = {
         "rev": round(df['_rev'].sum(), 2),
         "prof": round(df['_prof'].sum(), 2),
         "vat": round(df['_rev'].sum() * 0.15, 2),
-        "best_seller": str(df.groupby(final_p)['_rev'].sum().idxmax()),
-        "top_profit_prod": str(df.groupby(final_p)['_prof'].sum().idxmax()),
-        "p_col": final_p
+        "best_seller": str(df.groupby(final_p)['_rev'].sum().idxmax()) if df['_rev'].sum() > 0 else "N/A",
+        "top_profit_prod": str(df.groupby(final_p)['_prof'].sum().idxmax()) if df['_rev'].sum() > 0 else "N/A",
+        "p_col": final_p,
+        "avg_margin": round((df['_prof'].sum() / df['_rev'].sum()) * 100, 2) if df['_rev'].sum() > 0 else 0
     }
     return metrics, df
+
+# --- 4. THE INTELLIGENCE BRIDGE (Gemini Researcher + Groq Analyst) ---
+def get_intelligent_answer(groq_client, df, user_query, metrics):
+    try:
+        # Agent 1: Gemini (Data Researcher)
+        # Using 'models/gemini-1.5-flash-latest' to avoid 404 errors
+        model = genai.GenerativeModel('models/gemini-1.5-flash-latest')
+        
+        # Summary for context
+        summary_context = f"""
+        Business Summary:
+        - Total Revenue: {metrics['rev']} SAR
+        - Total Profit: {metrics['prof']} SAR
+        - Net Margin: {metrics['avg_margin']}%
+        - Top Product: {metrics['best_seller']}
+        - Most Profitable Product: {metrics['top_profit_prod']}
+        """
+
+        research_prompt = f"""
+        You are a Data Researcher analyzing a Saudi business dataset.
+        Question: "{user_query}"
+        
+        Current Metrics: {summary_context}
+        Available Columns: {list(df.columns)}
+        
+        Task: 
+        Scan the raw data (snapshot below) to find specific facts related to the question.
+        Focus on trends, specific product names, or geographical data if available.
+        
+        Data Snapshot:
+        {df.head(50).to_string()}
+        
+        Return a concise "Fact Sheet" for the Strategic Analyst.
+        """
+        
+        research_response = model.generate_content(research_prompt)
+        fact_sheet = research_response.text
+
+        # Agent 2: Groq (Strategic Consultant)
+        analysis_completion = groq_client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {"role": "system", "content": "You are a Senior Strategic Business Analyst. Use the Fact Sheet to give a data-backed response. Mention SAR values and provide 1-2 actionable tips based on the numbers."},
+                {"role": "user", "content": f"Fact Sheet: {fact_sheet}\n\nUser Question: {user_query}"}
+            ],
+            temperature=0.3
+        )
+        
+        return analysis_completion.choices[0].message.content
+    except Exception as e:
+        return f"Intelligence Bridge Error: {str(e)}"
+
+# --- 5. INITIAL INSIGHT GENERATOR ---
+def groq_get_insights(client, metrics):
+    try:
+        completion = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {"role": "system", "content": "You are a Saudi Business Consultant. Analyze the provided metrics and give 3 surgical growth tips. No generic advice."},
+                {"role": "user", "content": f"Revenue: {metrics['rev']}, Profit: {metrics['prof']}, Margin: {metrics['avg_margin']}%, Top Product: {metrics['best_seller']}."}
+            ]
+        )
+        return completion.choices[0].message.content
+    except: return "Consultant is busy with the numbers..."
 
