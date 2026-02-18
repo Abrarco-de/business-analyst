@@ -2,61 +2,64 @@ import streamlit as st
 import pandas as pd
 from business_ai_mvp import configure_dual_engines, process_business_data, get_ai_response
 
-st.set_page_config(page_title="Visionary SME AI", layout="wide")
+st.set_page_config(page_title="AI Business Strategist", layout="wide")
 
-# Sidebar Keys
-with st.sidebar:
-    st.header("🔑 AI Setup")
-    g_client, m_client = configure_dual_engines(st.secrets["GROQ_API_KEY"], st.secrets["MISTRAL_API_KEY"])
-    if not g_client: st.error("API Keys missing in secrets.toml")
-
-# State Initialize
+# --- 1. SESSION STATE INITIALIZATION (Prevents KeyErrors) ---
 if "messages" not in st.session_state: st.session_state.messages = []
-if "m" not in st.session_state: st.session_state.m = None
+if "m" not in st.session_state: 
+    st.session_state.m = {
+        "rev": 0, "prof": 0, "margin": 0, "vat": 0, 
+        "best_product": "Upload a file to see insights"
+    }
+if "df_final" not in st.session_state: st.session_state.df_final = None
 
-# 1. File Upload & Processing
-uploaded_file = st.file_uploader("Upload Business Data", type=["csv", "xlsx"])
-
-if uploaded_file and st.session_state.m is None:
-    df_raw = pd.read_csv(uploaded_file) if uploaded_file.name.endswith('csv') else pd.read_excel(uploaded_file)
-    with st.spinner("Cleaning data..."):
-        m, df_final = process_business_data(g_client, df_raw)
-        st.session_state.m = m
-        st.session_state.df_final = df_final
-
-# 2. Display Advanced Metrics
-# FIND THIS SECTION IN YOUR app.py AND REPLACE IT
-if st.session_state.m:
-    m = st.session_state.m
-    c1, c2, c3 = st.columns(3)
+# --- 2. SIDEBAR CONFIG ---
+with st.sidebar:
+    st.title("Settings")
+    g_key = st.secrets.get("GROQ_API_KEY")
+    m_key = st.secrets.get("MISTRAL_API_KEY")
+    g_client, m_client = configure_dual_engines(g_key, m_key)
     
-    # Use .get(key, default) to prevent KeyErrors
-    rev_val = m.get('rev', 0)
-    prof_val = m.get('prof', 0)
-    # We add a fallback in case 'best_product' hasn't calculated yet
-    best_p = m.get('best_product', "Processing...").split(',')[0]
+    if st.button("🗑️ Clear Chat"):
+        st.session_state.messages = []
+        st.rerun()
 
-    c1.metric("Revenue (SAR)", f"{rev_val:,}")
-    c2.metric("Net Profit", f"{prof_val:,}")
-    c3.metric("Top Product", best_p)
+# --- 3. DATA UPLOAD ---
+st.title("💎 Visionary SME AI Dashboard")
+uploaded_file = st.file_uploader("Upload CSV/Excel", type=["csv", "xlsx"])
 
-    # 3. Chatbot
-    st.divider()
-    for msg in st.session_state.messages:
-        with st.chat_message(msg["role"]): st.write(msg["content"])
+if uploaded_file:
+    df_raw = pd.read_csv(uploaded_file) if uploaded_file.name.endswith('csv') else pd.read_excel(uploaded_file)
+    with st.spinner("Analyzing your data..."):
+        m, df_cleaned = process_business_data(g_client, df_raw)
+        st.session_state.m = m
+        st.session_state.df_final = df_cleaned
 
-    if prompt := st.chat_input("How can I increase my profit?"):
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"): st.write(prompt)
-        
-        # --- GATEKEEPER FOR SMALL TALK ---
-        greetings = ["thank", "shukran", "hi", "hello", "hey"]
-        if any(x in prompt.lower() for x in greetings):
-            response = "You're welcome! What else can I check in your data?"
-        else:
-            with st.chat_message("assistant"):
-                response = get_ai_response(m_client, st.session_state.m, st.session_state.df_final, prompt)
-                st.write(response)
-        
-        st.session_state.messages.append({"role": "assistant", "content": response})
+# --- 4. ADVANCED METRIC CARDS ---
+m = st.session_state.m
+c1, c2, c3, c4 = st.columns(4)
+c1.metric("Revenue (SAR)", f"{m.get('rev', 0):,}")
+c2.metric("Net Profit", f"{m.get('prof', 0):,}")
+c3.metric("Profit Margin", f"{m.get('margin', 0)}%")
+c4.metric("Top Item", m.get('best_product', 'N/A').split('(')[0])
 
+# --- 5. CHATBOT WITH DATA EXCHANGE ---
+st.subheader("💬 AI Strategy Chat")
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]): st.write(msg["content"])
+
+if prompt := st.chat_input("Ex: Which product is most profitable?"):
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    with st.chat_message("user"): st.write(prompt)
+    
+    # Fast response for simple thanks
+    if any(word in prompt.lower() for word in ["thanks", "shukran", "bye"]):
+        response = "Happy to help! Let me know if you need anything else."
+    else:
+        with st.chat_message("assistant"):
+            # CORRECTED: Passing 4 arguments (client, metrics, df, prompt)
+            response = get_ai_response(m_client, st.session_state.m, st.session_state.df_final, prompt)
+            st.write(response)
+            
+    st.session_state.messages.append({"role": "assistant", "content": response})
+    
