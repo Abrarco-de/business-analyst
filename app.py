@@ -25,12 +25,20 @@ if uploaded_file and st.session_state.m is None:
         st.session_state.df_final = df_final
 
 # 2. Display Advanced Metrics
+# FIND THIS SECTION IN YOUR app.py AND REPLACE IT
 if st.session_state.m:
     m = st.session_state.m
     c1, c2, c3 = st.columns(3)
-    c1.metric("Revenue (SAR)", f"{m['rev']:,}")
-    c2.metric("Net Profit", f"{m['prof']:,}")
-    c3.metric("Best Products", m['best_product'].split(',')[0]) # Shows top 1
+    
+    # Use .get(key, default) to prevent KeyErrors
+    rev_val = m.get('rev', 0)
+    prof_val = m.get('prof', 0)
+    # We add a fallback in case 'best_product' hasn't calculated yet
+    best_p = m.get('best_product', "Processing...").split(',')[0]
+
+    c1.metric("Revenue (SAR)", f"{rev_val:,}")
+    c2.metric("Net Profit", f"{prof_val:,}")
+    c3.metric("Top Product", best_p)
 
     # 3. Chatbot
     st.divider()
@@ -51,3 +59,4 @@ if st.session_state.m:
                 st.write(response)
         
         st.session_state.messages.append({"role": "assistant", "content": response})
+
