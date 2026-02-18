@@ -1,75 +1,64 @@
 import streamlit as st
 import pandas as pd
-import google.generativeai as genai
-from business_ai_mvp import process_business_file, get_header_mapping, generate_insights, configure_ai
+from business_mvp import process_file, generate_metrics
 
-st.set_page_config(page_title="Visionary SME Analyst", layout="wide")
+st.set_page_config(
+    page_title="SME Business Intelligence",
+    layout="wide"
+)
 
-# UI Style
-st.markdown("""
-    <style>
-    [data-testid="stMetric"] {
-        background-color: #1E3A8A !important; 
-        border-radius: 12px; padding: 20px; border: 1px solid #2563EB;
-    }
-    [data-testid="stMetricValue"] { color: white !important; }
-    [data-testid="stMetricLabel"] { color: #CBD5E1 !important; }
-    </style>
-    """, unsafe_allow_html=True)
+st.title("📊 SME Business Intelligence Dashboard")
+st.caption("Professional business analytics for small & medium enterprises")
 
-# API Initialization
-if "GEMINI_API_KEY" in st.secrets:
-    ready = configure_ai(st.secrets["GEMINI_API_KEY"])
-else:
-    st.sidebar.error("Missing GEMINI_API_KEY in Secrets.")
-    ready = False
+uploaded_file = st.file_uploader(
+    "Upload Sales / POS File (CSV or Excel)",
+    type=["csv", "xlsx"]
+)
 
-st.title("📈 Visionary SME Analyst")
-file = st.file_uploader("Upload Sales Data", type=["csv", "xlsx"])
+if uploaded_file:
+    try:
+        df = process_file(uploaded_file)
+        metrics = generate_metrics(df)
 
-if file:
-    df_raw = process_business_file(file)
-    if df_raw is not None and not df_raw.empty:
-        mapping = get_header_mapping(list(df_raw.columns))
-        df_final = df_raw.rename(columns=mapping)
-        df_final = df_final.loc[:, ~df_final.columns.duplicated()].copy()
-        
-        res = generate_insights(df_final)
-
-        # Dashboard Metrics
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Revenue", f"{res['revenue']:,} SAR")
-        m2.metric("Profit", f"{res['profit']:,} SAR", f"{res['margin']}% Margin")
-        m3.metric("VAT (15%)", f"{res['vat']:,} SAR")
-        m4.metric("Cost Mode", "Estimated" if res['is_estimated'] else "Actual")
+        # ================= METRICS =================
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Revenue", f"{metrics['total_revenue']:,}")
+        c2.metric("Profit", f"{metrics['total_profit']:,}")
+        c3.metric("Margin %", f"{metrics['gross_margin']}%")
+        c4.metric("VAT (15%)", f"{metrics['vat']:,}")
 
         st.divider()
 
-        # Leaders & AI
-        c1, c2 = st.columns([2, 1])
-        with c1:
-            st.subheader("Revenue by Category")
-            chart_data = res['df'].groupby(res['name_col'])['calc_rev'].sum().sort_values(ascending=False).head(10)
-            st.bar_chart(chart_data, color="#1E3A8A")
-            st.info(f"🏆 **Best Seller:** {res['best_seller']}  |  💰 **Top Revenue:** {res['most_profitable']}")
+        # ================= BUSINESS INSIGHTS =================
+        st.subheader("📌 Key Insights")
+        st.write(f"• **Top Revenue Product:** {metrics['top_revenue_product']}")
+        st.write(f"• **Top Profit Product:** {metrics['top_profit_product']}")
+        st.write(
+            f"• **Revenue Concentration:** "
+            f"{metrics['revenue_concentration']}% from top product"
+        )
 
-        with c2:
-            st.subheader("AI Growth Strategy")
-            if st.button("✨ Generate Growth Advice"):
-                if ready:
-                    with st.spinner("Analyzing..."):
-                        # India/Global Stable Models
-                        for model_name in ['gemini-1.5-flash', 'gemini-pro']:
-                            try:
-                                model = genai.GenerativeModel(model_name)
-                                prompt = f"Analyze business with {res['revenue']} SAR revenue and {res['best_seller']} as top product. Give 3 short tips."
-                                response = model.generate_content(prompt)
-                                if response.text:
-                                    st.write(response.text)
-                                    break
-                            except:
-                                continue
-                else:
-                    st.error("AI not ready. Check API Key.")
-    else:
-        st.error("Could not read file. Check formatting.")
+        if metrics["revenue_concentration"] > 60:
+            st.warning("⚠ High dependency on a single product")
+
+        # ================= CHART =================
+        st.subheader("📈 Product Revenue Distribution")
+        st.bar_chart(
+            metrics["product_perf"]["revenue"].head(10),
+            use_container_width=True
+        )
+
+        # ================= LOSS MAKERS =================
+        if not metrics["loss_products"].empty:
+            st.subheader("❌ Loss Making Products")
+            st.dataframe(metrics["loss_products"])
+
+        # ================= RAW DATA =================
+        with st.expander("🔍 View Cleaned Data"):
+            st.dataframe(df)
+
+    except Exception as e:
+        st.error("Error processing file")
+        st.exception(e)
+else:
+    st.info("Upload a file to begin analysis")
