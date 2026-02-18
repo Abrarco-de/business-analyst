@@ -21,21 +21,29 @@ def process_business_file(uploaded_file):
     except: return None
 
 def get_header_mapping(columns):
-    """Smart Fuzzy Mapping: Detects columns even with weird names."""
     schema_hints = {
-        "product_name": ["item", "product", "category", "المنتج", "name", "desc", "type", "particulars"],
-        "unit_price": ["price", "rate", "سعر", "unit", "selling", "mrp", "amt", "val"],
-        "quantity": ["qty", "quantity", "count", "الكمية", "units", "sold", "vol", "pcs"],
-        "total_amount": ["total", "sales", "revenue", "net", "المجموع", "gross", "turnover"],
-        "cost_price": ["cost", "purchase", "buying", "التكلفة", "expense"]
+        "product_name": ["item", "product", "category", "sub", "المنتج", "name", "desc"],
+        "unit_price": ["price", "rate", "سعر", "unit"],
+        "quantity": ["qty", "quantity", "count", "الكمية", "units"],
+        "total_amount": ["total", "sales", "revenue", "net", "المجموع"],
+        "cost_price": ["cost", "purchase", "buying", "التكلفة"]
     }
     mapping = {}
+    counts = {}
+    
     for col in columns:
-        clean_col = str(col).lower().strip().replace(" ", "_").replace(".", "")
+        clean_col = str(col).lower().strip().replace(" ", "_")
+        matched = False
         for std, hints in schema_hints.items():
             if any(h in clean_col for h in hints):
-                mapping[col] = std
+                # Handle duplicates by adding a suffix
+                counts[std] = counts.get(std, 0) + 1
+                suffix = f"_{counts[std]}" if counts[std] > 1 else ""
+                mapping[col] = f"{std}{suffix}"
+                matched = True
                 break
+        if not matched:
+            mapping[col] = col
     return mapping
 
 def generate_insights(df):
@@ -87,6 +95,7 @@ def generate_insights(df):
         }
     except:
         return {"revenue":0, "profit":0, "margin":0, "vat":0, "best_seller":"N/A", "is_estimated":True, "df":df, "name_col":df.columns[0]}
+
 
 
 
