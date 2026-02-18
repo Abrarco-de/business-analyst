@@ -113,7 +113,7 @@ else:
     k1, k2, k3, k4 = st.columns(4)
     k1.metric("Total Revenue", f"{m.get('total_revenue', 0):,.0f} SAR")
     k2.metric("Net Profit", f"{m.get('total_profit', 0):,.0f} SAR")
-    k3.metric("Transaction Vol.", f"{m.get('total_units', 0):,}")
+    k3.metric("units sold.", f"{m.get('total_units', 0):,}")
     k4.metric("VAT Liability", f"{m.get('vat_due', 0):,.0f} SAR")
 
     st.divider()
@@ -158,4 +158,5 @@ else:
             ans = get_ai_response(m_client, m, p)
             st.session_state.chat.append({"role": "assistant", "content": ans})
             st.rerun()
+
 
