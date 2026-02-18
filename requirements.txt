@@ -1,7 +1,5 @@
 streamlit
-pandas
 google-generativeai
-lxml
-
+groq
+pandas
 openpyxl
-
