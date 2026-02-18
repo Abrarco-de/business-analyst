@@ -1,60 +1,75 @@
-def generate_insights(df):
+import pandas as pd
+import numpy as np
+import google.generativeai as genai
+from openai import OpenAI
+import json
+import re
+
+# --- CONFIGURATION ---
+def configure_engines(gemini_key, openai_key):
     try:
-        # --- 1. Data Cleaning ---
-        # Keep only the first of any duplicate columns
-        df = df.loc[:, ~df.columns.duplicated()].copy()
+        genai.configure(api_key=gemini_key)
+        client = OpenAI(api_key=openai_key)
+        return client
+    except:
+        return None
 
-        def get_num(col_name):
-            series = df.get(col_name, pd.Series([0.0]*len(df)))
-            if isinstance(series, pd.DataFrame):
-                series = series.iloc[:, 0]
-            return pd.to_numeric(series, errors='coerce').fillna(0.0)
+def process_business_file(uploaded_file):
+    try:
+        df = pd.read_csv(uploaded_file, encoding='latin1') if uploaded_file.name.endswith('.csv') else pd.read_excel(uploaded_file)
+        df.columns = [str(c).replace('ï»¿', '').strip() for c in df.columns]
+        return df
+    except: return None
 
-        # --- 2. Calculations ---
-        calc_qty = get_num("quantity")
-        
-        if "total_amount" in df.columns:
-            calc_rev = get_num("total_amount")
-        else:
-            calc_rev = get_num("unit_price") * calc_qty
-        
-        # Avoid empty dataset errors
-        total_rev = float(calc_rev.sum())
-        
-        # --- 3. The Result Dictionary ---
-        # Important: Ensure this is INSIDE the try block
-        res = {
-            "revenue": round(total_rev, 2),
-            "profit": round(total_rev * 0.35, 2), # Default 35% margin if cost missing
-            "margin": 35.0,
-            "vat": round(total_rev * 0.15, 2),
-            "best_seller": "N/A",
-            "most_profitable": "N/A",
-            "is_estimated": True,
-            "df": df,
-            "name_col": df.columns[0]
-        }
-        
-        # Try to get real product names if they exist
-        if "product_name" in df.columns:
-            df['calc_rev'] = calc_rev
-            res['name_col'] = "product_name"
-            res['best_seller'] = df.groupby("product_name")['calc_rev'].sum().idxmax()
+# --- ENGINE 1: GEMINI (The Architect) ---
+def gemini_get_schema(columns):
+    try:
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        prompt = f"Map these columns to business roles: {list(columns)}. Return ONLY JSON: {{'product_col': '', 'revenue_col': '', 'profit_col': '', 'price_col': '', 'qty_col': ''}}"
+        response = model.generate_content(prompt)
+        json_str = re.search(r'\{.*\}', response.text, re.DOTALL).group()
+        return json.loads(json_str)
+    except:
+        return {"product_col": columns[0], "revenue_col": "None"}
 
-        return res # <--- SUCCESS RETURN
+# --- ENGINE 2: PYTHON (The Accountant) ---
+def calculate_precise_metrics(df, schema):
+    def to_f(c):
+        if not c or c not in df.columns or c == "None": return pd.Series([0.0]*len(df))
+        return pd.to_numeric(df[c].astype(str).str.replace(r'[^\d.]', '', regex=True), errors='coerce').fillna(0.0)
 
+    # Revenue Logic
+    if schema.get("revenue_col") != "None":
+        df['_rev'] = to_f(schema["revenue_col"])
+    else:
+        df['_rev'] = to_f(schema.get("price_col")) * to_f(schema.get("qty_col"))
+
+    # Profit Logic
+    if schema.get("profit_col") != "None":
+        df['_prof'] = to_f(schema["profit_col"])
+    else:
+        df['_prof'] = df['_rev'] * 0.25 # Default 25%
+
+    m = {
+        "rev": df['_rev'].sum(),
+        "prof": df['_prof'].sum(),
+        "vat": df['_rev'].sum() * 0.15,
+        "best_seller": df.groupby(schema["product_col"])['_rev'].sum().idxmax(),
+        "most_profitable": df.groupby(schema["product_col"])['_prof'].sum().idxmax(),
+        "p_col": schema["product_col"]
+    }
+    return m, df
+
+# --- ENGINE 3: OPENAI (The Strategist) ---
+def gpt_get_strategy(client, metrics):
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": "You are a CEO-level Business Consultant."},
+                {"role": "user", "content": f"Data: Revenue {metrics['rev']} SAR, Profit {metrics['prof']}, Top Item {metrics['best_seller']}, Top Profit Maker {metrics['most_profitable']}. Give 3 high-level growth strategies."}
+            ]
+        )
+        return response.choices[0].message.content
     except Exception as e:
-        # --- 4. THE SAFETY NET ---
-        # If anything fails, return a 'Zero' dictionary instead of None
-        print(f"Error in insights: {e}")
-        return {
-            "revenue": 0.0,
-            "profit": 0.0,
-            "margin": 0.0,
-            "vat": 0.0,
-            "best_seller": "Error in data",
-            "most_profitable": "Error in data",
-            "is_estimated": True,
-            "df": df,
-            "name_col": df.columns[0] if not df.empty else "None"
-        }
+        return f"GPT Strategy currently unavailable: {str(e)}"
