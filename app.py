@@ -55,31 +55,33 @@ if file:
             chart_data = res['df'].groupby(res['name_col'])['calc_rev'].sum().sort_values(ascending=False).head(10)
             st.bar_chart(chart_data, color="#1E3A8A")
         
-        with c2:
+    with c2:
             st.subheader("AI Growth Strategy")
             if st.button("✨ Generate Strategy"):
-                # Use the 'latest' stable alias which works across most regions
                 try:
-                    # Check if key exists
-                    if "GEMINI_API_KEY" not in st.secrets:
-                        st.error("API Key not found in Secrets!")
+                    # 'gemini-1.5-flash' is the stable production name. 
+                    # If this fails, the system is forced to look for the version available to your key.
+                    model = genai.GenerativeModel(model_name='gemini-1.5-flash')
+                    
+                    prompt = f"Analyze Saudi SME: Rev {res['revenue']} SAR, Top Item {res['best_seller']}. Give 3 growth tips."
+                    
+                    # We add safety settings to ensure the request is standard
+                    response = model.generate_content(prompt)
+                    
+                    if response.text:
+                        st.info(response.text)
                     else:
-                        # Force use of v1 stable model
-                        model = genai.GenerativeModel('gemini-1.5-flash') 
+                        st.warning("AI reached a limit. Try again in a moment.")
                         
-                        prompt = f"""
-                        Acting as a Saudi Business Consultant, analyze:
-                        Total Revenue: {res['revenue']} SAR
-                        Product Performance: {res['best_seller']} is the top item.
-                        Provide 3 professional growth tips for this SME.
-                        """
-                        
+                except Exception as e:
+                    # If gemini-1.5-flash fails, we try the backup 'gemini-pro'
+                    try:
+                        model = genai.GenerativeModel('gemini-pro')
                         response = model.generate_content(prompt)
                         st.info(response.text)
-                except Exception as e:
-                    # This will show you the ACTUAL error so we can fix it
-                    st.error(f"AI Error: {str(e)}")
-    else:
+                    except:
+                        st.error("Model version mismatch. Please update the 'google-generativeai' library.")
         st.error("File is empty or corrupted.")
+
 
 
