@@ -242,6 +242,34 @@ def calculate_metrics(df: pd.DataFrame) -> Dict:
         )
 
     return metrics
+    # ================= AI INSIGHT NARRATOR =================
+def generate_ai_insights(metrics: Dict) -> str:
+    if _model is None:
+        return "AI insights unavailable (API key not configured)."
+
+    prompt = f"""
+You are a business analyst advising a small business owner.
+
+Explain these metrics in simple, actionable language.
+Be concise, practical, and honest.
+Do NOT invent numbers.
+
+Metrics:
+{json.dumps(metrics, indent=2)}
+
+Focus on:
+- Profitability risks
+- Pricing or discount issues
+- What to improve first
+"""
+
+    try:
+        response = _model.generate_content(prompt)
+        return response.text.strip()
+    except Exception:
+        return "AI insight generation failed."
+
+
 
 
 
