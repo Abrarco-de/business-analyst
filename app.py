@@ -2,195 +2,117 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import os
-# Importing from your renamed logic file
 from Truemetrics import configure_dual_engines, process_business_data, get_ai_response
 
-#0 mapping ver
-# 1. MAPPING VERIFICATION
-    with st.expander("🔍 AI DATA MAPPING PREVIEW", expanded=True): # Changed to True to help debug
-        if "mapping_preview" in m and len(m["mapping_preview"]) > 0:
-            st.markdown("<p style='font-size:14px; color:#94a3b8;'>TrueMetrics matched your file headers to our logic:</p>", unsafe_allow_html=True)
-            pdf = pd.DataFrame(m["mapping_preview"])
-            st.table(pdf) # Using st.table instead of st.dataframe for better visibility in dark mode
-        else:
-            st.warning("AI Mapping is active, but no preview data was generated. Check your column headers.")
+# 1. PAGE SETUP
+st.set_page_config(page_title="TrueMetrics | Intelligence", page_icon="🎯", layout="wide")
 
-# 1. PAGE CONFIGURATION
-st.set_page_config(
-    page_title="TrueMetrics | Precision Intelligence", 
-    page_icon="🎯", 
-    layout="wide",
-    initial_sidebar_state="collapsed"
-)
-
-# BRAND COLORS
+# STYLE CONSTANTS
 ACCENT_BLUE = "#3B82F6"
 ACCENT_LIME = "#A3E635"
 GLASS_BG = "rgba(255, 255, 255, 0.03)"
 GLASS_BORDER = "rgba(255, 255, 255, 0.1)"
 
-# 2. PREMIUM TPCAP CSS STYLING
+# 2. UI STYLING
 st.markdown(f"""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap');
-    
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;800&display=swap');
     html, body, [data-testid="stAppViewContainer"] {{
         background: radial-gradient(circle at top right, #1e293b, #0f172a, #020617);
         font-family: 'Inter', sans-serif;
         color: #f8fafc;
     }}
-
-    /* Glassmorphic Metric Cards */
     div[data-testid="stMetric"] {{
         background: {GLASS_BG} !important;
-        backdrop-filter: blur(16px);
+        backdrop-filter: blur(12px);
         border: 1px solid {GLASS_BORDER} !important;
-        border-radius: 24px !important;
-        padding: 25px !important;
-        transition: transform 0.3s ease;
+        border-radius: 20px !important;
+        padding: 20px !important;
     }}
-    div[data-testid="stMetric"]:hover {{
-        transform: translateY(-5px);
-        border-color: {ACCENT_BLUE} !important;
-    }}
-
-    /* Custom Glass Panes for Charts/Chat */
     .glass-pane {{
         background: {GLASS_BG};
         backdrop-filter: blur(12px);
         border: 1px solid {GLASS_BORDER};
-        border-radius: 24px;
+        border-radius: 20px;
         padding: 20px;
         margin-bottom: 20px;
     }}
-
-    /* Typography */
     .hero-text {{
-        font-size: 56px; font-weight: 800; letter-spacing: -2px;
+        font-size: 50px; font-weight: 800; letter-spacing: -2px;
         background: linear-gradient(to right, #ffffff, #94a3b8);
         -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-        line-height: 1.1;
-    }}
-    
-    /* Clean Sidebar */
-    section[data-testid="stSidebar"] {{
-        background-color: rgba(15, 23, 42, 0.9) !important;
-    }}
-
-    /* Mapping Table Customization */
-    [data-testid="stExpander"] {{
-        background: {GLASS_BG} !important;
-        border: 1px solid {GLASS_BORDER} !important;
-        border-radius: 15px !important;
     }}
     </style>
     """, unsafe_allow_html=True)
 
-# 3. INITIALIZE ENGINES & SESSION
+# 3. INITIALIZATION
 g_client, m_client = configure_dual_engines(st.secrets.get("GROQ_API_KEY"), st.secrets.get("MISTRAL_API_KEY"))
 
 if "m" not in st.session_state: st.session_state.m = None
 if "chat" not in st.session_state: st.session_state.chat = []
 
-# --- HEADER / LOGO ---
-col_l, col_r = st.columns([1, 4])
-with col_l:
-    if os.path.exists("logo.png"):
-        st.image("logo.png", width=160)
-    else:
-        st.markdown(f"<h1 style='color:{ACCENT_LIME}; margin:0;'>🎯</h1>", unsafe_allow_html=True)
+# --- HEADER ---
+if os.path.exists("logo.png"):
+    st.image("logo.png", width=150)
 
-# --- APP STATES ---
-
-# STATE A: FILE UPLOAD (WELCOME SCREEN)
+# --- APP LOGIC ---
 if st.session_state.m is None:
-    st.markdown("<div style='height: 80px;'></div>", unsafe_allow_html=True)
-    st.markdown("<h1 class='hero-text'>Precision intelligence<br>starts here.</h1>", unsafe_allow_html=True)
-    st.markdown(f"<p style='color:#94a3b8; font-size:18px; margin-bottom:40px;'>Upload your business records to begin the TrueMetrics analysis.</p>", unsafe_allow_html=True)
-    
-    up = st.file_uploader("", type=["csv", "xlsx"])
+    st.markdown("<h1 class='hero-text'>Precision Intelligence.</h1>", unsafe_allow_html=True)
+    up = st.file_uploader("Upload Data", type=["csv", "xlsx"])
     if up:
-        try:
-            raw = pd.read_csv(up) if up.name.endswith('csv') else pd.read_excel(up)
-            m, _ = process_business_data(raw)
-            if "error" in m:
-                st.error(m["error"])
-            else:
-                st.session_state.m = m
-                st.rerun()
-        except Exception as e:
-            st.error(f"Upload failed: {e}")
-
-# STATE B: ACTIVE DASHBOARD
+        raw = pd.read_csv(up) if up.name.endswith('csv') else pd.read_excel(up)
+        m, _ = process_business_data(raw)
+        if "error" in m: st.error(m["error"])
+        else:
+            st.session_state.m = m
+            st.rerun()
 else:
     m = st.session_state.m
-    
-    # 1. MAPPING VERIFICATION (Transparent & Interactive)
-    with st.expander("🔍 AI DATA MAPPING PREVIEW", expanded=False):
-        st.markdown("<p style='font-size:14px; color:#94a3b8;'>Check how our engine interpreted your file headers:</p>", unsafe_allow_html=True)
+
+    # A. DATA MAPPING PREVIEW
+    with st.expander("🔍 DATA MAPPING VERIFICATION", expanded=True):
         if "mapping_preview" in m:
-            pdf = pd.DataFrame(m["mapping_preview"])
-            st.dataframe(pdf, use_container_width=True, hide_index=True)
-        st.info("Verified: Logic applied across all records.")
+            st.table(pd.DataFrame(m["mapping_preview"]))
+        else:
+            st.warning("Mapping data not available.")
 
-    st.markdown("<div style='height: 20px;'></div>", unsafe_allow_html=True)
-
-    # 2. KPI MATRIX (The Grid)
+    # B. KPI GRID
+    st.markdown("### Performance Matrix")
     k1, k2, k3, k4 = st.columns(4)
-    k1.metric("REVENUE", f"{m['total_revenue']:,.0f} SAR")
-    k2.metric("NET PROFIT", f"{m['total_profit']:,.0f} SAR")
-    k3.metric("MARGIN", f"{m['margin_pct']}%")
-    k4.metric("VOL.", f"{m['total_units']:,}")
+    k1.metric("Revenue", f"{m['total_revenue']:,.0f} SAR")
+    k2.metric("Profit", f"{m['total_profit']:,.0f} SAR")
+    k3.metric("Margin", f"{m['margin_pct']}%")
+    k4.metric("Records", f"{m['total_units']:,}")
 
-    st.markdown("<div style='height: 30px;'></div>", unsafe_allow_html=True)
+    # C. VISUALS & CHAT
+    st.markdown("<div style='height: 20px;'></div>", unsafe_allow_html=True)
+    c_left, c_right = st.columns([1.5, 1])
 
-    # 3. INTERACTIVE VISUALS & CHAT
-    col_viz, col_chat = st.columns([1.6, 1])
-
-    with col_viz:
+    with c_left:
         st.markdown("<div class='glass-pane'>", unsafe_allow_html=True)
-        st.markdown("<p style='font-weight:600; letter-spacing:1px; margin-bottom:20px;'>STRATEGIC REVENUE TREND</p>", unsafe_allow_html=True)
         if m.get('trend_data'):
             tdf = pd.DataFrame(m['trend_data'].items(), columns=['Date', 'Sales'])
-            fig = px.line(tdf, x='Date', y='Sales', template="plotly_dark")
-            fig.update_layout(
-                plot_bgcolor='rgba(0,0,0,0)',
-                paper_bgcolor='rgba(0,0,0,0)',
-                xaxis=dict(showgrid=False),
-                yaxis=dict(gridcolor="rgba(255,255,255,0.05)"),
-                margin=dict(l=0, r=0, t=10, b=0),
-                height=380
-            )
-            fig.update_traces(line_color=ACCENT_BLUE, line_width=4, fill='tozeroy', fillcolor='rgba(59, 130, 246, 0.05)')
+            fig = px.line(tdf, x='Date', y='Sales', title="Strategic Trend")
+            fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font_color='white')
+            fig.update_traces(line_color=ACCENT_BLUE, line_width=4)
             st.plotly_chart(fig, use_container_width=True)
         st.markdown("</div>", unsafe_allow_html=True)
 
-    with col_chat:
+    with c_right:
         st.markdown("<div class='glass-pane'>", unsafe_allow_html=True)
-        st.markdown(f"<p style='font-weight:600; color:{ACCENT_LIME};'>TRUEMETRICS AI CONSULTANT</p>", unsafe_allow_html=True)
-        
-        # Chat Display
-        chat_box = st.container(height=320)
+        st.markdown(f"<p style='color:{ACCENT_LIME}; font-weight:bold;'>AI CONSULTANT</p>", unsafe_allow_html=True)
+        chat_box = st.container(height=300)
         with chat_box:
             for msg in st.session_state.chat:
-                with st.chat_message(msg["role"]):
-                    st.markdown(msg["content"])
+                with st.chat_message(msg["role"]): st.write(msg["content"])
         
-        # Input
-        if p := st.chat_input("Analyze performance..."):
+        if p := st.chat_input("Analyze..."):
             st.session_state.chat.append({"role": "user", "content": p})
             ans = get_ai_response(m_client, m, p)
             st.session_state.chat.append({"role": "assistant", "content": ans})
             st.rerun()
         st.markdown("</div>", unsafe_allow_html=True)
 
-    # 4. SIDEBAR ACTIONS
-    with st.sidebar:
-        st.markdown(f"<h2 style='color:{ACCENT_BLUE}'>TrueMetrics</h2>", unsafe_allow_html=True)
-        st.caption("v2.0 Precision Engine")
-        st.divider()
-        if st.button("RESET SYSTEM", use_container_width=True):
-            st.session_state.m = None
-            st.session_state.chat = []
-            st.rerun()
-
+    if st.sidebar.button("Reset System"):
+        st.session_state.m = None
+        st.rerun()
