@@ -1,6 +1,6 @@
 import streamlit as st
 import os
-import business_mvp as mvp
+import business_ai_mvp as mvp
 
 st.set_page_config(page_title="Advanced Business Analyst", layout="wide")
 
@@ -66,6 +66,7 @@ if uploaded_file:
 
 else:
     st.info("Upload a sales / POS file to get started")
+
 
 
 
