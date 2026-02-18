@@ -49,10 +49,29 @@ if file:
         c_left, c_right = st.columns([2, 1])
         
         with c_left:
-            st.subheader("Revenue by Category")
-            chart_data = res['df'].groupby(res['name_col'])['temp_rev'].sum().sort_values(ascending=False).head(10)
+    st.subheader("Revenue by Category")
+    
+    # ADVANCED LOGIC: Check if data exists to avoid crashes
+    if not res['df'].empty:
+        try:
+            # Ensure the grouping column exists and sum the revenue
+            chart_data = (
+                res['df']
+                .groupby(res['name_col'])['temp_rev']
+                .sum()
+                .sort_values(ascending=False)
+                .head(10)
+            )
+            
+            # Professional Bar Chart
             st.bar_chart(chart_data, color="#1E3A8A")
-
+            
+            # Add a small summary text below the chart
+            st.caption(f"Showing top categories based on {res['name_col']}")
+        except Exception as e:
+            st.warning("Could not generate chart. Please check if the product column is correct.")
+    else:
+        st.info("No data available to display chart.")
         with c_right:
             st.subheader("AI Strategic Advice")
             if st.button("✨ Get Growth Tips"):
@@ -70,5 +89,6 @@ if file:
                 else: st.error("AI is not configured.")
 
     else: st.error("Unsupported file format.")
+
 
 
