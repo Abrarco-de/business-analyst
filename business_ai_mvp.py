@@ -16,37 +16,39 @@ def process_business_file(uploaded_file):
             df = pd.read_csv(uploaded_file, encoding='latin1')
         else:
             df = pd.read_excel(uploaded_file)
-        # Clean BOM characters like ï»¿
-        df.columns = [c.replace('ï»¿', '').strip() for c in df.columns]
-        df = df.dropna(how='all').loc[:, ~df.columns.duplicated()]
+        df.columns = [str(c).replace('ï»¿', '').strip() for c in df.columns]
         return df
     except: return None
 
 def get_header_mapping(columns):
+    # Rule-based detection
     schema_hints = {
-        "product_name": ["item", "product", "category", "sub", "name", "desc", "particulars"],
+        "product_name": ["item", "product", "category", "sub", "name", "desc"],
         "unit_price": ["price", "rate", "unit"],
         "quantity": ["qty", "quantity", "count", "units", "sold"],
         "total_amount": ["total", "sales", "revenue", "net", "amount"],
-        "cost_price": ["cost", "purchase", "buying", "profit"] # Added profit here as a fallback
+        "cost_price": ["cost", "purchase", "buying", "profit"]
     }
     mapping = {}
-    counts = {}
     for col in columns:
         clean_col = str(col).lower().strip().replace(" ", "_")
-        matched = False
         for std, hints in schema_hints.items():
             if any(h in clean_col for h in hints):
-                counts[std] = counts.get(std, 0) + 1
-                suffix = f"_{counts[std]}" if counts[std] > 1 else ""
-                mapping[col] = f"{std}{suffix}"
-                matched = True
+                mapping[col] = std
                 break
-        if not matched: mapping[col] = col
     return mapping
 
-def generate_insights(df):
+def generate_insights(df, mapping_overrides=None):
+    """
+    Calculates metrics. mapping_overrides allows manual selection from UI.
+    """
     try:
+        # Use manual selection if provided, else use auto-mapping
+        col_map = mapping_overrides if mapping_overrides else {}
+        
+        def get_col(std_name):
+            return col_map.get(std_name, std_name)
+
         def to_num(col_name):
             if col_name not in df.columns: return pd.Series([0.0]*len(df))
             series = df[col_name]
@@ -54,29 +56,28 @@ def generate_insights(df):
                 series = series.astype(str).str.replace(r'[^\d.]', '', regex=True)
             return pd.to_numeric(series, errors='coerce').fillna(0.0)
 
-        # 1. Math Logic
-        qty = to_num("quantity")
-        rev = to_num("total_amount") if "total_amount" in df.columns else to_num("unit_price") * qty
-        df['temp_rev'] = rev
+        # CORE MATH
+        rev_col = get_col("total_amount")
+        qty_col = get_col("quantity")
         
+        qty = to_num(qty_col)
+        rev = to_num(rev_col) if rev_col in df.columns else (to_num(get_col("unit_price")) * qty)
+        
+        df['temp_rev'] = rev
         total_rev = float(rev.sum())
-        # Use existing Profit column if available (common in retail datasets)
-        if "cost_price" in df.columns:
-            profit_series = to_num("cost_price") # Mapping 'Profit' column to cost_price logic
-            total_profit = float(profit_series.sum())
+        
+        # Profit Logic: If user picked 'Profit' column, use it. Else 35% estimate.
+        profit_col = get_col("cost_price")
+        if profit_col in df.columns:
+            total_profit = float(to_num(profit_col).sum())
         else:
             total_profit = total_rev * 0.35
-            
-        # 2. Smart Best Seller Logic (Looks for the most specific product column)
-        # We look for product_name, product_name_2, etc. and pick the one with most unique values
-        prod_cols = [c for c in df.columns if "product_name" in c]
-        if prod_cols:
-            # Pick column with most unique items (usually the actual Product Name vs Category)
-            name_col = max(prod_cols, key=lambda x: df[x].nunique())
-        else:
-            name_col = df.select_dtypes(include=['object']).columns[0]
 
-        best_seller = df.groupby(name_col)['temp_rev'].sum().idxmax() if total_rev > 0 else "N/A"
+        # Best Seller
+        name_col = get_col("product_name")
+        best_seller = "N/A"
+        if name_col in df.columns and total_rev > 0:
+            best_seller = df.groupby(name_col)['temp_rev'].sum().idxmax()
 
         return {
             "revenue": round(total_rev, 2),
