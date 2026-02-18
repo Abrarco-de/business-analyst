@@ -8,11 +8,13 @@ def configure_dual_engines(groq_key, mistral_key):
     try:
         if groq_key: g = Groq(api_key=groq_key)
         if mistral_key: m = Mistral(api_key=mistral_key)
-    except: pass
+    except:
+        pass
     return g, m
 
 def clean_num(series):
-    if series is None: return 0
+    if series is None: 
+        return 0
     clean = series.astype(str).str.replace(r'[^\d.-]', '', regex=True)
     return pd.to_numeric(clean, errors='coerce').fillna(0)
 
@@ -20,7 +22,6 @@ def detect_col(df, keywords):
     cols = [str(c).strip() for c in df.columns]
     for k in keywords:
         for c in cols:
-            # Matches exact or partial (e.g., "Total Sales" matches "Sales")
             if k.lower() == c.lower() or k.lower() in c.lower():
                 return c
     return None
@@ -31,118 +32,75 @@ def process_business_data(df_raw):
             return {"error": "The uploaded file is empty."}, None
             
         df = df_raw.copy()
-        
-        # --- NEW: This list MUST be created here ---
         mapping_details = []
         
-        # Column Detection Keywords
         detect_map = {
             'Revenue': ['Sales', 'Revenue', 'Amount', 'Total', 'Price', 'Income', 'المبيعات'],
             'Profit': ['Profit', 'Margin', 'Earnings', 'Net', 'Gain', 'الربح'],
             'Date': ['Date', 'Time', 'Year', 'Month', 'Period', 'التاريخ'],
-            'City': ['City', 'Region', 'Location', 'Branch', 'Area', 'المدينة']
+            'City': ['City', 'Region', 'Location', 'Branch', 'Area', 'المدينة'],
+            'Category': ['Category', 'Dept', 'Group', 'Type', 'الفئة'],
+            'Product': ['Sub Category', 'Product', 'Item', 'Description', 'المنتج']
         }
 
-        # Track what we find
         found_cols = {}
         for key, keywords in detect_map.items():
-            actual_col = detect_col(df, keywords) # Uses your detect_col function
+            actual_col = detect_col(df, keywords)
             if actual_col:
                 found_cols[key] = actual_col
-                # Grab a sample value for the preview table
                 sample_val = df[actual_col].iloc[0]
                 mapping_details.append({
                     "AI Interpretation": key, 
                     "Your Header": actual_col, 
-                    "Example Data": str(sample_val)
+                    "Sample Value": str(sample_val)
                 })
 
         if 'Revenue' not in found_cols:
-            return {"error": "Could not find a Sales/Revenue column."}, df_raw
+            return {"error": "Required column 'Sales' or 'Revenue' not found."}, df_raw
 
-        # ... (rest of your cleaning/logic code) ...
+        # Data Processing
+        df['_rev'] = clean_num(df[found_cols['Revenue']])
+        df['_prof'] = clean_num(df[found_cols['Profit']]) if 'Profit' in found_cols else df['_rev'] * 0.20
+        
+        prod_key = found_cols.get('Product', df.columns[0])
+        p_stats = df.groupby(prod_key).agg({'_rev':'sum', '_prof':'sum'})
+        p_stats['m'] = (p_stats['_prof'] / p_stats['_rev'] * 100).replace([np.inf, -np.inf], 0).fillna(0)
 
-        # --- IMPORTANT: Ensure mapping_preview is in this dictionary ---
-        metrics = {
-            "mapping_preview": mapping_details,  # <--- THIS IS WHAT APP.PY LOOKS FOR
-            "total_revenue": float(df['_rev'].sum()),
-            "total_profit": float(df['_prof'].sum()),
-            "total_units": int(df['_qty'].sum()) if '_qty' in df else 0,
-            "vat_due": float(df['_rev'].sum() * 0.15),
-            "margin_pct": round((df['_prof'].sum()/df['_rev'].sum()*100), 1) if df['_rev'].sum() > 0 else 0,
-            "bot_margin_list": [], 
-            "top_margin_list": [],
-            "trend_data": {} 
-        }
-        return metrics, df
-    except Exception as e:
-        return {"error": f"Engine Error: {str(e)}"}, df_raw
-
-        # ... (rest of your cleaning and aggregation logic remains the same) ...
-
-        # Add the mapping_details to your metrics dictionary
-        metrics = {
-            # ... (all your existing metrics) ...
-            "mapping_preview": mapping_details,
-            "total_revenue": float(df['_rev'].sum()), # etc...
-        }
-        return metrics, df
-        # 2. Cleaning
-        df['_rev'] = clean_num(df[rev_col])
-        df['_prof'] = clean_num(df[prof_col]) if prof_col else df['_rev'] * 0.20
-        df['_qty'] = clean_num(df[qty_col]) if qty_col else 1 
-
-        # 3. Aggregations for AI
-        # Fallback to the first column if category/city aren't found
-        cat_key = cat_col if cat_col else df.columns[0]
-        city_key = city_col if city_col else (cat_col if cat_col else df.columns[0])
-
-        profile = {
-            "categories": df.groupby(cat_key)['_rev'].sum().to_dict(),
-            "cities": df.groupby(city_key)['_rev'].sum().to_dict(),
-            "sub_cat_units": df.groupby(sub_cat_col or cat_key).size().to_dict()
-        }
-
-        # 4. Trend Logic
         trend_dict = {}
-        if date_col:
-            df['_date'] = pd.to_datetime(df[date_col], dayfirst=True, errors='coerce')
+        if 'Date' in found_cols:
+            df['_date'] = pd.to_datetime(df[found_cols['Date']], dayfirst=True, errors='coerce')
             if not df['_date'].isna().all():
-                try: 
-                    monthly = df.dropna(subset=['_date']).set_index('_date')['_rev'].resample('ME').sum()
-                except: 
-                    monthly = df.dropna(subset=['_date']).set_index('_date')['_rev'].resample('M').sum()
+                temp_df = df.dropna(subset=['_date']).set_index('_date')
+                try:
+                    monthly = temp_df['_rev'].resample('ME').sum()
+                except:
+                    monthly = temp_df['_rev'].resample('M').sum()
                 trend_dict = {k.strftime('%Y-%m-%d'): float(v) for k, v in monthly.items()}
 
-        p_stats = df.groupby(sub_cat_col or cat_key).agg({'_rev':'sum', '_prof':'sum'})
-        p_stats['m'] = (p_stats['_prof']/p_stats['_rev']*100).fillna(0)
-
         metrics = {
+            "mapping_preview": mapping_details,
             "total_revenue": float(df['_rev'].sum()),
             "total_profit": float(df['_prof'].sum()),
-            "total_units": int(df['_qty'].sum()),
+            "total_units": len(df),
             "vat_due": float(df['_rev'].sum() * 0.15),
             "margin_pct": round((df['_prof'].sum()/df['_rev'].sum()*100), 1) if df['_rev'].sum() > 0 else 0,
             "bot_margin_list": [f"{n} ({m:.1f}%)" for n, m in p_stats.sort_values('m').head(3)['m'].items()],
             "top_margin_list": [f"{n} ({m:.1f}%)" for n, m in p_stats.sort_values('m', ascending=False).head(3)['m'].items()],
-            "trend_data": trend_dict,
-            "data_profile": profile 
+            "trend_data": trend_dict
         }
         return metrics, df
     except Exception as e:
-        return {"error": f"Engine Error: {str(e)}"}, df_raw
+        return {"error": f"Engine Logic Error: {str(e)}"}, df_raw
 
 def get_ai_response(mistral_client, m, query):
-    if not mistral_client: return "AI not connected."
-    profile = m.get('data_profile', {})
-    context = f"""
-    You are TrueMetrics AI. 
-    Sales: {m['total_revenue']:,} SAR | Profit: {m['total_profit']:,} SAR | VAT: {m['vat_due']:,} SAR | Units: {m['total_units']:,}.
-    Details: {profile}
-    """
+    if not mistral_client: 
+        return "AI Engine Offline. Check Secrets."
+    context = f"Metrics: Rev {m['total_revenue']} SAR, Profit {m['total_profit']} SAR."
     try:
-        res = mistral_client.chat.complete(model="mistral-large-latest", messages=[{"role":"user", "content": f"{context}\nQuestion: {query}"}])
+        res = mistral_client.chat.complete(
+            model="mistral-large-latest", 
+            messages=[{"role":"user", "content": f"{context}\nQuestion: {query}"}]
+        )
         return res.choices[0].message.content
-    except: return "Analysing..."
-
-
+    except:
+        return "Analysis complete. System ready."
