@@ -62,18 +62,30 @@ if file:
             chart_data = res['df'].groupby(res['name_col'])['calc_rev'].sum().sort_values(ascending=False).head(10)
             st.bar_chart(chart_data, color="#1E3A8A")
         
-        with c2:
+       with c2:
             st.subheader("AI Growth Strategy")
             if st.button("✨ Generate Strategy"):
-                try:
-                    # Using the stable production name with a fallback
-                    model = genai.GenerativeModel('gemini-1.5-flash')
-                    prompt = f"Analyze Saudi SME: Rev {res['revenue']} SAR, Top Item {res['best_seller']}. Give 3 growth tips."
-                    response = model.generate_content(prompt)
-                    st.info(response.text)
-                except Exception as e:
-                    st.error(f"AI Connection Issue. Please try again.")
+                # Define potential models to try
+                models_to_try = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-pro']
+                success = False
+                
+                for model_name in models_to_try:
+                    try:
+                        model = genai.GenerativeModel(model_name)
+                        prompt = f"Analyze Saudi SME: Rev {res['revenue']} SAR. Give 3 short tips."
+                        response = model.generate_content(prompt)
+                        
+                        if response.text:
+                            st.info(response.text)
+                            success = True
+                            break # Stop if we get a response
+                    except:
+                        continue # Try the next model if this one fails
+                
+                if not success:
+                    st.error("AI is currently busy or region-restricted. Please check your API billing/quota at AI Studio.")
     else:
         st.error("File is empty or corrupted.")
+
 
 
