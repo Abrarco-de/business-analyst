@@ -268,6 +268,19 @@ Focus on:
         return response.text.strip()
     except Exception:
         return "AI insight generation failed."
+ def resolve_columns(df):
+    resolved = {}
+    cols = [c.lower().strip() for c in df.columns]
+
+    for canonical, variants in CANONICAL_SCHEMA.items():
+        for i, col in enumerate(cols):
+            if col == canonical or col in variants:
+                resolved[canonical] = df.columns[i]
+                break
+
+    return resolved
+S       
+
 
 
 
