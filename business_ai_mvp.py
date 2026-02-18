@@ -6,15 +6,21 @@ import re
 def configure_ai(api_key):
     if api_key:
         try:
-            # This forces the stable v1 API version
+            # 1. Force the library to use REST instead of gRPC
             import os
             os.environ["GOOGLE_API_USE_MTLS_ENDPOINT"] = "never"
-            genai.configure(api_key=api_key, transport='rest') 
+            
+            # 2. Configure with specific transport
+            genai.configure(api_key=api_key, transport='rest')
+            
+            # 3. Quick internal test to see if the key actually works
+            model = genai.GenerativeModel('gemini-1.5-flash')
+            # If this doesn't crash, the connection is solid
             return True
-        except:
+        except Exception as e:
+            print(f"AI Config Error: {e}")
             return False
     return False
-
 def process_business_file(uploaded_file):
     """Safely loads CSV or Excel files."""
     try:
@@ -103,5 +109,6 @@ def generate_insights(df):
         }
     except Exception as e:
         return {"revenue": 0, "profit": 0, "margin": 0, "vat": 0, "best_seller": "Error", "most_profitable": "Error", "is_estimated": True, "df": df, "name_col": "N/A"}
+
 
 
