@@ -1,98 +1,108 @@
 import pandas as pd
+import json
+import os
+from typing import Dict, List, Optional
 
-# ---------- COLUMN ALIASES ----------
-COLUMN_MAP = {
-    "product_name": ["product", "item", "item_name", "menu_item", "description", "name"],
-    "quantity": ["qty", "quantity", "units", "count"],
-    "unit_price": ["price", "unit_price", "rate"],
-    "sales": ["sales", "revenue", "total_sales", "amount"],
-    "profit": ["profit", "net_profit", "margin_value"],
-    "discount": ["discount", "discount_amount"],
+# ================= AI CONFIG =================
+try:
+    import google.generativeai as genai
+    AI_AVAILABLE = True
+except ImportError:
+    AI_AVAILABLE = False
+
+_model = None
+
+def configure_ai(api_key: Optional[str]):
+    global _model
+    if api_key and AI_AVAILABLE:
+        genai.configure(api_key=api_key)
+        _model = genai.GenerativeModel("gemini-1.0-pro")
+    else:
+        _model = None
+
+
+# ================= STANDARD CONCEPTS =================
+STANDARD_FIELDS = {
+    "product_name": ["product", "item", "menu", "name", "item_name", "description"],
+    "quantity": ["qty", "quantity", "count", "units", "sold"],
+    "price": ["price", "unit_price", "selling_price"],
+    "sales": ["sales", "revenue", "amount", "total"],
+    "cost": ["cost", "purchase", "buying_price"],
+    "profit": ["profit", "margin"],
+    "discount": ["discount", "disc"]
 }
 
-# ---------- UTIL ----------
-def find_column(df, aliases):
-    for col in df.columns:
-        if col.lower().strip() in aliases:
-            return col
-    return None
+REQUIRED_LOGIC = [
+    {"quantity", "price"},
+    {"quantity", "sales"},
+    {"sales"}  # fallback if only sales exists
+]
 
-# ---------- CORE ----------
-def process_business_file(uploaded_file):
-    if uploaded_file.name.endswith(".csv"):
-        df = pd.read_csv(uploaded_file)
-    else:
-        df = pd.read_excel(uploaded_file)
+# ================= FALLBACK RULE ENGINE =================
+def rule_based_mapping(columns: List[str]) -> Dict[str, str]:
+    mapping = {}
+    cols_lower = {c.lower(): c for c in columns}
 
-    df.columns = [c.lower().strip() for c in df.columns]
+    for std_field, keywords in STANDARD_FIELDS.items():
+        for col_l, col in cols_lower.items():
+            if any(k in col_l for k in keywords):
+                mapping[col] = std_field
+                break
 
-    schema = {}
-    for standard, aliases in COLUMN_MAP.items():
-        found = find_column(df, aliases)
-        if found:
-            schema[standard] = found
-
-    df = df.rename(columns={v: k for k, v in schema.items()})
-
-    if "product_name" not in df:
-        df["product_name"] = "Unknown Item"
-
-    return df
-
-# ---------- ANALYTICS ----------
-def generate_insights(df):
-    # ---------- CASE 1: POS already gives sales + profit ----------
-    if "sales" in df.columns and "profit" in df.columns:
-        df["sales"] = pd.to_numeric(df["sales"], errors="coerce").fillna(0)
-        df["profit"] = pd.to_numeric(df["profit"], errors="coerce").fillna(0)
-        df["discount"] = pd.to_numeric(df.get("discount", 0), errors="coerce").fillna(0)
-
-        total_revenue = round(df["sales"].sum(), 2)
-        total_profit = round(df["profit"].sum(), 2)
-        margin = round((total_profit / total_revenue * 100), 2) if total_revenue else 0
-
-    # ---------- CASE 2: Need to calculate ----------
-    elif "unit_price" in df.columns and "quantity" in df.columns:
-        df["unit_price"] = pd.to_numeric(df["unit_price"], errors="coerce").fillna(0)
-        df["quantity"] = pd.to_numeric(df["quantity"], errors="coerce").fillna(0)
-        df["sales"] = df["unit_price"] * df["quantity"]
-        df["profit"] = df["sales"]  # cost unknown
-
-        total_revenue = round(df["sales"].sum(), 2)
-        total_profit = round(df["profit"].sum(), 2)
-        margin = 0
-
-    else:
-        raise ValueError(
-            "File must contain either (sales + profit) OR (price + quantity)"
-        )
-
-    vat = round(total_revenue * 0.15, 2)
-
-    top_products = (
-        df.groupby("product_name")["profit"]
-        .sum()
-        .sort_values(ascending=False)
-        .head(5)
-        .reset_index()
-    )
-
-    loss_products = (
-        df.groupby("product_name")["profit"]
-        .sum()
-        .sort_values()
-        .head(5)
-        .reset_index()
-    )
-
-    return {
-        "total_revenue": total_revenue,
-        "total_profit": total_profit,
-        "margin": margin,
-        "vat": vat,
-        "top_products": top_products,
-        "loss_products": loss_products,
-    }
+    return mapping
 
 
+# ================= AI SCHEMA PROPOSAL =================
+def ai_schema_mapping(columns: List[str]) -> Dict[str, str]:
+    if _model is None:
+        return {}
+
+    prompt = f"""
+You are a senior data analyst.
+
+Map these columns to business concepts.
+
+Columns:
+{columns}
+
+Concepts:
+product_name, quantity, price, sales, cost, profit, discount
+
+Rules:
+- If unsure, skip the column
+- Return JSON only
+"""
+
+    try:
+        response = _model.generate_content(prompt)
+        text = response.text.strip()
+        text = text.replace("```json", "").replace("```", "")
+        return json.loads(text)
+    except Exception:
+        return {}
+
+
+# ================= VALIDATION ENGINE =================
+def validate_schema(mapped_values: set) -> bool:
+    for rule in REQUIRED_LOGIC:
+        if rule.issubset(mapped_values):
+            return True
+    return False
+
+
+# ================= FINAL SCHEMA BUILDER =================
+def build_schema(columns: List[str]) -> Dict[str, str]:
+    # 1️⃣ AI proposal
+    ai_map = ai_schema_mapping(columns)
+
+    # 2️⃣ Rule-based fallback
+    rule_map = rule_based_mapping(columns)
+
+    # 3️⃣ Merge (AI wins, rules fill gaps)
+    final_map = rule_map.copy()
+    final_map.update(ai_map)
+
+    mapped_values = set(final_map.values())
+
+    if not valida
 
