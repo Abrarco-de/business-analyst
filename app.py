@@ -32,13 +32,17 @@ else:
 st.title("📈 Visionary SME Analyst")
 file = st.file_uploader("Upload CSV/Excel", type=["csv", "xlsx"])
 
-if file:
-    df_raw = process_business_file(file)
-    if df_raw is not None:
+if uploaded_file:
+    df_raw = process_business_file(uploaded_file)
+    if df_raw is not None:  # <--- Check this!
         mapping = get_header_mapping(list(df_raw.columns))
         df_final = df_raw.rename(columns=mapping)
         res = generate_insights(df_final)
-
+        
+        if res is not None: # <--- Extra safety check
+            m1.metric("Revenue", f"{res['revenue']:,} SAR")
+        else:
+            st.error("Could not generate insights from this data.")
         # Metrics Row
         m1, m2, m3 = st.columns(3)
         m1.metric("Revenue", f"{res['revenue']:,} SAR")
@@ -55,3 +59,4 @@ if file:
                 st.info(response.text)
             except Exception as e:
                 st.error(f"API Error: {str(e)}")
+
