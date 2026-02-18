@@ -101,39 +101,37 @@ def calculate_precise_metrics(df):
     }
     return metrics, df
 
-def groq_get_insights(client, metrics):
+def get_intelligent_answer(groq_client, df, user_query, metrics):
+    """Bridge Gemini's data extraction with Groq's strategic reasoning."""
     try:
-        # Create a detailed data string for the AI to "chew" on
-        data_summary = f"""
-        - Total Revenue: {metrics['rev']} SAR
-        - Total Profit: {metrics['prof']} SAR
-        - Net Margin: {round((metrics['prof']/metrics['rev'])*100, 2) if metrics['rev'] > 0 else 0}%
-        - Top Product by Revenue: {metrics['best_seller']}
-        - Top Product by Profit: {metrics['top_profit_prod']}
-        - Estimated VAT Liability: {metrics['vat']} SAR
-        """
-
-        # Detailed instructions to avoid generic advice
-        system_prompt = """
-        You are a Senior Strategic Business Analyst specializing in the Saudi retail market. 
-        Your task is to analyze the provided metrics and give 3 UNIQUE, data-specific insights.
+        # Step 1: Gemini extracts specific data points from the full DF
+        # We give Gemini a sample of the data to understand the structure
+        sample_data = df.head(10).to_string()
         
-        RULES:
-        1. NO generic advice like 'improve marketing' or 'save costs'.
-        2. If 'Best Seller' is different from 'Top Profit Maker', analyze why (Volume vs Margin).
-        3. Mention the specific product names and numbers provided.
-        4. Focus on the 'Margin Gap' or 'VAT Impact' if relevant.
-        5. Use a professional, executive tone.
+        researcher_model = genai.GenerativeModel('gemini-1.5-flash')
+        research_prompt = f"""
+        You are a Data Researcher. Look at this user question: "{user_query}"
+        Based on the dataset columns {list(df.columns)}, find the specific facts.
+        
+        If the user asks about a specific month, product, or trend, summarize the specific numbers from the data.
+        Dataset Summary: Total Rows {len(df)}, Top Item: {metrics['best_seller']}.
+        
+        Return a concise FACT SHEET for the Analyst.
         """
+        
+        research_response = researcher_model.generate_content(research_prompt)
+        fact_sheet = research_response.text
 
-        completion = client.chat.completions.create(
+        # Step 2: Groq analyzes Gemini's findings
+        analysis_completion = groq_client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"Here is the business performance data: {data_summary}. Provide a surgical growth strategy."}
+                {"role": "system", "content": "You are a Strategic Business Analyst. Use the provided Fact Sheet to answer the user query. Be specific, use numbers, and avoid generic advice."},
+                {"role": "user", "content": f"Fact Sheet from Researcher: {fact_sheet}\n\nUser Question: {user_query}"}
             ],
-            temperature=0.3, # Lower temperature = more factual/logical
+            temperature=0.2
         )
-        return completion.choices[0].message.content
+        
+        return analysis_completion.choices[0].message.content
     except Exception as e:
-        return f"Analyst is busy: {str(e)}"
+        return f"Intelligence Bridge Error: {str(e)}"
