@@ -1,6 +1,9 @@
 import streamlit as st
 import pandas as pd
 from business_mvp import process_file, generate_metrics
+import os
+st.write("Files in directory:", os.listdir())
+
 
 st.set_page_config(
     page_title="SME Business Intelligence",
@@ -62,3 +65,4 @@ if uploaded_file:
         st.exception(e)
 else:
     st.info("Upload a file to begin analysis")
+
