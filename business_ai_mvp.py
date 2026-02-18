@@ -10,41 +10,45 @@ def configure_dual_engines(groq_key, mistral_key):
     except: return None, None
 
 def process_business_data(groq_client, df):
-    # Initialize defaults to prevent KeyError in UI
-    metrics = {
-        "rev": 0, "prof": 0, "margin": 0, "vat": 0,
-        "best_product": "No data analyzed yet"
-    }
+    metrics = {"rev": 0, "prof": 0, "margin": 0, "vat": 0, "best_product": "No data found"}
     
     try:
+        # Standardize columns
         df.columns = [str(c).strip() for c in df.columns]
+
+        # --- IMPROVED PRODUCT DETECTION ---
+        # 1. Look for columns containing "Name" or "Description" first
+        prod_keywords = ['name', 'desc', 'item', 'product', 'title']
+        avoid_keywords = ['id', 'code', 'sku', 'serial', 'no', 'number']
         
-        # 1. Smart Column Mapping
+        # Priority 1: Has "name/desc" but NOT "id/code"
+        prod_col = next((c for c in df.columns if any(k in c.lower() for k in prod_keywords) 
+                         and not any(a in c.lower() for a in avoid_keywords)), None)
+        
+        # Priority 2: Just has "name/desc/item"
+        if not prod_col:
+            prod_col = next((c for c in df.columns if any(k in c.lower() for k in prod_keywords)), df.columns[0])
+
+        # Standard mapping for Revenue and Profit
         r_col = next((c for c in df.columns if any(x in c.lower() for x in ['rev', 'sale', 'amount'])), df.columns[0])
         p_col = next((c for c in df.columns if any(x in c.lower() for x in ['prof', 'net'])), None)
-        prod_col = next((c for c in df.columns if any(x in c.lower() for x in ['prod', 'item', 'desc'])), df.columns[0])
 
-        # 2. Clean Numeric Data
+        # Numeric Conversion
         df['_rev'] = pd.to_numeric(df[r_col].astype(str).str.replace(r'[^\d.-]', '', regex=True), errors='coerce').fillna(0)
         df['_prof'] = pd.to_numeric(df[p_col].astype(str).str.replace(r'[^\d.-]', '', regex=True), errors='coerce').fillna(0) if p_col else df['_rev'] * 0.20
         
-        # 3. Calculate Advanced Metrics
-        total_rev = df['_rev'].sum()
-        total_prof = df['_prof'].sum()
-        
-        # Find Top 3 Products for "Data Exchange"
+        # Calculate Top 3
         top_df = df.groupby(prod_col)['_prof'].sum().sort_values(ascending=False).head(3)
         top_list = ", ".join([f"{n} ({v:,.0f} SAR)" for n, v in top_df.items()])
 
         metrics.update({
-            "rev": round(total_rev, 2),
-            "prof": round(total_prof, 2),
-            "margin": round((total_prof / total_rev * 100), 2) if total_rev > 0 else 0,
-            "best_product": top_list,
-            "vat": round(total_rev * 0.15, 2)
+            "rev": round(df['_rev'].sum(), 2),
+            "prof": round(df['_prof'].sum(), 2),
+            "margin": round((df['_prof'].sum() / df['_rev'].sum() * 100), 2) if df['_rev'].sum() > 0 else 0,
+            "best_product": top_list
         })
     except Exception as e:
-        print(f"Cleaning Error: {e}")
+        st.error(f"Detection Error: {e}")
         
     return metrics, df
 
@@ -72,3 +76,4 @@ def get_ai_response(mistral_client, metrics, df, user_query):
         return response.choices[0].message.content
     except Exception as e:
         return f"AI Error: {str(e)}"
+
