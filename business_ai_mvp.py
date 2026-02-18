@@ -1,9 +1,8 @@
 import pandas as pd
-import json
-import os
-from typing import Dict, List, Optional
+from typing import Dict
+import re
 
-# ================= AI CONFIG =================
+# Optional AI
 try:
     import google.generativeai as genai
     AI_AVAILABLE = True
@@ -12,274 +11,163 @@ except ImportError:
 
 _model = None
 
-def configure_ai(api_key: Optional[str]):
+def configure_ai(api_key):
     global _model
     if api_key and AI_AVAILABLE:
         genai.configure(api_key=api_key)
-        _model = genai.GenerativeModel("gemini-1.0-pro")
+        _model = genai.GenerativeModel("gemini-pro")
     else:
         _model = None
 
 
-# ================= STANDARD CONCEPTS =================
-STANDARD_FIELDS = {
-    "product_name": ["product", "item", "menu", "name", "item_name", "description"],
-    "quantity": ["qty", "quantity", "count", "units", "sold"],
-    "price": ["price", "unit_price", "selling_price"],
-    "sales": ["sales", "revenue", "amount", "total"],
-    "cost": ["cost", "purchase", "buying_price"],
-    "profit": ["profit", "margin"],
-    "discount": ["discount", "disc"]
+# ALIASES for schema detection
+COLUMN_ALIASES = {
+    "product_name": ["product","item","menu","name","description","prod"],
+    "quantity": ["qty","quantity","units","sold","count"],
+    "price": ["price","unit_price","rate","sell_price"],
+    "sales": ["sales","revenue","total"],
+    "cost": ["cost","cost_price","purchase","buy_price"],
+    "profit": ["profit","profit_value"],
+    "discount": ["discount","disc","rebate"]
 }
 
-REQUIRED_LOGIC = [
-    {"quantity", "price"},
-    {"quantity", "sales"},
-    {"sales"}  # fallback if only sales exists
-]
+def find_best_column(df_cols, aliases):
+    df_lc = [c.lower().strip() for c in df_cols]
+    for alias in aliases:
+        if alias in df_lc:
+            return df_cols[df_lc.index(alias)]
+    return None
 
-# ================= FALLBACK RULE ENGINE =================
-def rule_based_mapping(columns: List[str]) -> Dict[str, str]:
-    mapping = {}
-    cols_lower = {c.lower(): c for c in columns}
+def map_schema(df: pd.DataFrame) -> Dict[str,str]:
+    # rule-based mapping
+    schema = {}
+    for standard, aliases in COLUMN_ALIASES.items():
+        matched = find_best_column(df.columns, aliases)
+        if matched:
+            schema[matched] = standard
 
-    for std_field, keywords in STANDARD_FIELDS.items():
-        for col_l, col in cols_lower.items():
-            if any(k in col_l for k in keywords):
-                mapping[col] = std_field
-                break
+    return schema
 
-    return mapping
+def validate_schema(mapped_fields):
+    # must have revenue or (quantity + price)
+    if "sales" in mapped_fields.values():
+        return True
+    if "quantity" in mapped_fields.values() and "price" in mapped_fields.values():
+        return True
+    raise ValueError("Data must contain either sales OR (quantity + price) columns.")
 
-
-# ================= AI SCHEMA PROPOSAL =================
-def ai_schema_mapping(columns: List[str]) -> Dict[str, str]:
-    if _model is None:
-        return {}
-
-    prompt = f"""
-You are a senior data analyst.
-
-Map these columns to business concepts.
-
-Columns:
-{columns}
-
-Concepts:
-product_name, quantity, price, sales, cost, profit, discount
-
-Rules:
-- If unsure, skip the column
-- Return JSON only
-"""
-
-    try:
-        response = _model.generate_content(prompt)
-        text = response.text.strip()
-        text = text.replace("```json", "").replace("```", "")
-        return json.loads(text)
-    except Exception:
-        return {}
-
-
-# ================= VALIDATION ENGINE =================
-def validate_schema(mapped_values: set) -> bool:
-    for rule in REQUIRED_LOGIC:
-        if rule.issubset(mapped_values):
-            return True
-    return False
-
-
-# ================= FINAL SCHEMA BUILDER =================
-def build_schema(columns: List[str]) -> Dict[str, str]:
-    # 1️⃣ AI proposal
-    ai_map = ai_schema_mapping(columns)
-
-    # 2️⃣ Rule-based fallback
-    rule_map = rule_based_mapping(columns)
-
-    # 3️⃣ Merge (AI wins, rules fill gaps)
-    final_map = rule_map.copy()
-    final_map.update(ai_map)
-
-    mapped_values = set(final_map.values())
-
-    if not validate_schema(mapped_values):
-        raise ValueError(
-            "Dataset must contain at least:\n"
-            "- quantity + price OR\n"
-            "- quantity + sales OR\n"
-            "- sales\n"
-        )
-
-    return final_map
-
-
-# ================= FILE PROCESSOR =================
-def process_business_file(file) -> pd.DataFrame:
+def process_business_file(file):
     if file.name.endswith(".csv"):
         df = pd.read_csv(file)
     else:
         df = pd.read_excel(file)
 
-    schema = build_schema(list(df.columns))
+    df.columns = [c.lower().strip() for c in df.columns]
+    schema = map_schema(df)
+
+    validate_schema(schema)
+
+    # rename for internal use
     df = df.rename(columns=schema)
 
-    # Ensure numeric columns
-    for col in ["quantity", "price", "sales", "cost", "profit", "discount"]:
+    # numeric conversion
+    for col in ["quantity","price","sales","cost","profit","discount"]:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
 
+    # ensure default fields
+    if "product_name" not in df:
+        df["product_name"] = "Unknown"
+
+    if "sales" not in df and "price" in df and "quantity" in df:
+        df["sales"] = df["price"] * df["quantity"]
+
+    if "profit" not in df:
+        df["profit"] = df["sales"] - df.get("cost",0)
+
     return df
 
-
-# ================= INSIGHTS ENGINE (NO AI) =================
-def generate_insights(df: pd.DataFrame) -> Dict:
-    insights = {}
-
-    if "sales" not in df.columns:
-        df["sales"] = df.get("quantity", 1) * df.get("price", 0)
-
-    if "profit" not in df.columns:
-        cost = df.get("cost", 0)
-        df["profit"] = df["sales"] - (df.get("quantity", 1) * cost)
-
-    insights["total_revenue"] = round(df["sales"].sum(), 2)
-    insights["total_profit"] = round(df["profit"].sum(), 2)
-    insights["margin"] = round(
-        (insights["total_profit"] / insights["total_revenue"] * 100)
-        if insights["total_revenue"] > 0 else 0,
-        2
-    )
-
-    if "product_name" in df.columns:
-        insights["top_items"] = (
-            df.groupby("product_name")["sales"]
-            .sum()
-            .sort_values(ascending=False)
-            .head(5)
-            .to_dict()
-        )
-
-    insights["vat_due"] = round(insights["total_revenue"] * 0.15, 2)
-
-    return insights
-    # ================= ADVANCED METRICS ENGINE =================
 def calculate_metrics(df: pd.DataFrame) -> Dict:
     metrics = {}
 
-    # --- Ensure required computed columns ---
-    if "sales" not in df.columns:
-        df["sales"] = df.get("quantity", 1) * df.get("price", 0)
-
-    if "profit" not in df.columns:
-        cost = df.get("cost", 0)
-        df["profit"] = df["sales"] - (df.get("quantity", 1) * cost)
-
-    # --- Core Totals ---
-    metrics["total_revenue"] = round(df["sales"].sum(), 2)
-    metrics["total_profit"] = round(df["profit"].sum(), 2)
-
+    # total metrics
+    metrics["total_revenue"] = round(df["sales"].sum(),2)
+    metrics["total_profit"] = round(df["profit"].sum(),2)
     metrics["gross_margin_pct"] = round(
-        (metrics["total_profit"] / metrics["total_revenue"]) * 100
-        if metrics["total_revenue"] > 0 else 0,
-        2
+        (metrics["total_profit"]/metrics["total_revenue"]*100) if metrics["total_revenue"] else 0,2
+    )
+    metrics["vat_due"] = round(metrics["total_revenue"] * 0.15,2)
+
+    # average indicators
+    metrics["average_transaction_value"] = round(
+        metrics["total_revenue"] / max(len(df),1),2
     )
 
-    metrics["vat_due"] = round(metrics["total_revenue"] * 0.15, 2)
+    # product-level analysis
+    grp = df.groupby("product_name").agg({
+        "sales":"sum", "profit":"sum", "quantity":"sum"
+    }).reset_index()
 
-    # --- Order-Level ---
-    metrics["average_order_value"] = round(
-        metrics["total_revenue"] / max(len(df), 1), 2
+    grp["margin_pct"] = (
+        grp["profit"] / grp["sales"] * 100
+    ).replace([float("inf"),-float("inf")],0).fillna(0)
+
+    metrics["top_revenue_products"] = (
+        grp.sort_values("sales",ascending=False)
+        .head(5)[["product_name","sales"]]
+        .to_dict("records")
+    )
+    metrics["top_profit_products"] = (
+        grp.sort_values("profit",ascending=False)
+        .head(5)[["product_name","profit"]]
+        .to_dict("records")
+    )
+    metrics["loss_making_products"] = (
+        grp[grp["profit"] < 0]
+        .sort_values("profit")[["product_name","profit"]]
+        .to_dict("records")
+    )
+    metrics["high_volume_low_margin"] = (
+        grp[
+            (grp["quantity"] > grp["quantity"].median()) &
+            (grp["margin_pct"] < grp["margin_pct"].median())
+        ][["product_name","quantity","margin_pct"]]
+        .to_dict("records")
     )
 
-    # --- Product-Level Intelligence ---
-    if "product_name" in df.columns:
-        grouped = df.groupby("product_name").agg({
-            "sales": "sum",
-            "profit": "sum",
-            "quantity": "sum"
-        }).reset_index()
-
-        grouped["margin_pct"] = (
-            grouped["profit"] / grouped["sales"] * 100
-        ).replace([float("inf"), -float("inf")], 0).fillna(0)
-
-        metrics["top_revenue_items"] = (
-            grouped.sort_values("sales", ascending=False)
-            .head(5)[["product_name", "sales"]]
-            .to_dict("records")
-        )
-
-        metrics["top_profit_items"] = (
-            grouped.sort_values("profit", ascending=False)
-            .head(5)[["product_name", "profit"]]
-            .to_dict("records")
-        )
-
-        metrics["loss_making_items"] = (
-            grouped[grouped["profit"] < 0]
-            .sort_values("profit")
-            .head(5)[["product_name", "profit"]]
-            .to_dict("records")
-        )
-
-        metrics["high_volume_low_margin"] = (
-            grouped[
-                (grouped["quantity"] > grouped["quantity"].median()) &
-                (grouped["margin_pct"] < grouped["margin_pct"].median())
-            ][["product_name", "quantity", "margin_pct"]]
-            .to_dict("records")
-        )
-
-    # --- Discount Impact ---
+    # optional discount summary
     if "discount" in df.columns:
-        metrics["total_discount"] = round(df["discount"].sum(), 2)
-        metrics["discount_ratio_pct"] = round(
-            (metrics["total_discount"] / metrics["total_revenue"]) * 100
-            if metrics["total_revenue"] > 0 else 0,
-            2
+        metrics["total_discount"] = round(df["discount"].sum(),2)
+        metrics["discount_rate_pct"] = round(
+            (metrics["total_discount"]/metrics["total_revenue"]*100) if metrics["total_revenue"] else 0,2
         )
 
     return metrics
-    # ================= AI INSIGHT NARRATOR =================
+
 def generate_ai_insights(metrics: Dict) -> str:
     if _model is None:
-        return "AI insights unavailable (API key not configured)."
+        return "AI insights are unavailable because API key is not configured."
 
+    # prepare narrative
     prompt = f"""
-You are a business analyst advising a small business owner.
+You are a senior business analyst specializing in SME retail/cafe/restaurant.
+Interpret the following metrics and write a human-readable summary
+with practical advice for the business owner:
 
-Explain these metrics in simple, actionable language.
-Be concise, practical, and honest.
-Do NOT invent numbers.
+{metrics}
 
-Metrics:
-{json.dumps(metrics, indent=2)}
-
-Focus on:
-- Profitability risks
-- Pricing or discount issues
-- What to improve first
+Respond with:
+- High-level summary
+- Key strengths
+- Key weaknesses
+- Practical suggestions
 """
-
     try:
         response = _model.generate_content(prompt)
         return response.text.strip()
-    except Exception:
-        return "AI insight generation failed."
-  def resolve_columns(df):
-    resolved = {}
-    cols = [c.lower().strip() for c in df.columns]
+    except Exception as e:
+        return f"AI insight generation failed: {e}"
 
-    for canonical, variants in CANONICAL_SCHEMA.items():
-        for i, col in enumerate(cols):
-            if col == canonical or col in variants:
-                resolved[canonical] = df.columns[i]
-                break
-
-      return resolved
-     
 
 
 
