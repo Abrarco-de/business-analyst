@@ -2,68 +2,65 @@ import pandas as pd
 import numpy as np
 import google.generativeai as genai
 import re
+import os
 
 def configure_ai(api_key):
-    if api_key:
-        try:
-            # 1. Force the library to use REST instead of gRPC
-            import os
-            os.environ["GOOGLE_API_USE_MTLS_ENDPOINT"] = "never"
-            
-            # 2. Configure with specific transport
-            genai.configure(api_key=api_key, transport='rest')
-            
-            # 3. Quick internal test to see if the key actually works
-            model = genai.GenerativeModel('gemini-1.5-flash')
-            # If this doesn't crash, the connection is solid
-            return True
-        except Exception as e:
-            print(f"AI Config Error: {e}")
-            return False
-    return False
+    """Forcing REST transport to fix the India/Streamlit connection bug."""
+    if not api_key:
+        return False
+    try:
+        # Force REST transport to bypass gRPC errors on cloud servers
+        genai.configure(api_key=api_key, transport='rest')
+        return True
+    except Exception as e:
+        print(f"AI Configuration Error: {e}")
+        return False
+
 def process_business_file(uploaded_file):
-    """Safely loads CSV or Excel files."""
+    """Safely loads file and handles potential encoding issues."""
     try:
         if uploaded_file.name.endswith('.csv'):
-            df = pd.read_csv(uploaded_file)
+            # Encoding 'unicode_escape' or 'latin1' handles hidden symbols in CSVs
+            df = pd.read_csv(uploaded_file, encoding='latin1')
         else:
             df = pd.read_excel(uploaded_file)
-        # Remove duplicate columns immediately
+        
+        # Clean empty rows and remove duplicate columns
+        df = df.dropna(how='all')
         df = df.loc[:, ~df.columns.duplicated()].copy()
         return df
-    except:
-        return pd.DataFrame() # Return empty instead of None
+    except Exception:
+        return None
 
 def get_header_mapping(columns):
+    """Maps your dataset columns to the app logic."""
     standard_schema = {
-        # Added 'category' and 'sub' here to catch your specific columns
-        "product_name": ["item", "product", "category", "sub", "المنتج", "الصنف", "type", "description"],
-        "unit_price": ["price per unit", "unit price", "rate", "سعر الوحدة", "price", "unit_price"],
-        "quantity": ["qty", "quantity", "count", "الكمية", "units", "amount"],
-        "total_amount": ["total amount", "total sales", "net amount", "المجموع", "total", "sales", "revenue"],
-        "cost_price": ["unit cost", "cost price", "purchase", "التكلفة", "cost"]
+        "product_name": ["item", "product", "category", "sub", "المنتج", "type", "description"],
+        "unit_price": ["price per unit", "unit price", "rate", "price", "unit_price"],
+        "quantity": ["qty", "quantity", "count", "units", "amount"],
+        "total_amount": ["total amount", "total sales", "net amount", "total", "sales", "revenue"],
+        "cost_price": ["unit cost", "cost price", "purchase", "cost"]
     }
     mapping = {}
     for col in columns:
-        col_l = str(col).lower().strip().replace(" ", "_") # Clean the column name
+        col_l = str(col).lower().strip().replace(" ", "_")
         for std, hints in standard_schema.items():
             if any(h in col_l for h in hints):
                 mapping[col] = std
                 break
     return mapping
+
 def generate_insights(df):
-    """The engine that cleans and analyzes everything."""
+    """Calculates metrics while cleaning inconsistent data types."""
     try:
-        # Handle Category + Sub-Category
+        # 1. Handle Multiple Product Columns (Category + Sub-Category)
         prod_cols = [i for i, col in enumerate(df.columns) if col == 'product_name']
         if len(prod_cols) > 1:
             df['product_name_final'] = df.iloc[:, prod_cols].fillna('General').astype(str).agg(' - '.join, axis=1)
             df = df.drop(df.columns[prod_cols], axis=1)
             df['product_name'] = df['product_name_final']
-        else:
-            df = df.loc[:, ~df.columns.duplicated()].copy()
 
-        # Helper to clean currency and convert to float
+        # 2. Helper to clean currency strings (e.g., '100 SAR' -> 100.0)
         def to_num(col_name):
             data = df.get(col_name, pd.Series([0.0]*len(df)))
             if isinstance(data, pd.DataFrame): data = data.iloc[:, 0]
@@ -71,44 +68,40 @@ def generate_insights(df):
                 data = data.str.replace(r'[^\d.]', '', regex=True)
             return pd.to_numeric(data, errors='coerce').fillna(0.0)
 
+        # 3. Core Calculations
         df['calc_qty'] = to_num("quantity")
         if "total_amount" in df.columns:
             df['calc_rev'] = to_num("total_amount")
         else:
             df['calc_rev'] = to_num("unit_price") * df['calc_qty']
 
-        # Financial Calculations
         rev = float(df['calc_rev'].sum())
-        vat = rev * 0.15
         
         if "cost_price" in df.columns:
             df['calc_cost'] = to_num("cost_price") * df['calc_qty']
             is_est = False
         else:
-            df['calc_cost'] = df['calc_rev'] * 0.65 # 65% default cost
+            df['calc_cost'] = df['calc_rev'] * 0.65  # Default 65% cost
             is_est = True
 
-        profit = float(df['calc_rev'].sum() - df['calc_cost'].sum())
+        profit = rev - float(df['calc_cost'].sum())
         margin = (profit / rev * 100) if rev > 0 else 0
 
-        # Leaderboard
+        # 4. Results
         name_col = 'product_name' if 'product_name' in df.columns else df.columns[0]
         best_seller = df.groupby(name_col)['calc_qty'].sum().idxmax() if not df.empty else "N/A"
-        most_profitable = df.groupby(name_col)['calc_rev'].sum().idxmax() if not df.empty else "N/A"
+        top_rev_item = df.groupby(name_col)['calc_rev'].sum().idxmax() if not df.empty else "N/A"
 
         return {
             "revenue": round(rev, 2),
             "profit": round(profit, 2),
             "margin": round(margin, 2),
-            "vat": round(vat, 2),
+            "vat": round(rev * 0.15, 2),
             "best_seller": best_seller,
-            "most_profitable": most_profitable,
+            "most_profitable": top_rev_item,
             "is_estimated": is_est,
             "df": df,
             "name_col": name_col
         }
-    except Exception as e:
+    except Exception:
         return {"revenue": 0, "profit": 0, "margin": 0, "vat": 0, "best_seller": "Error", "most_profitable": "Error", "is_estimated": True, "df": df, "name_col": "N/A"}
-
-
-
