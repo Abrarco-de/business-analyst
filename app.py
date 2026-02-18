@@ -147,4 +147,11 @@ if uploaded_file:
                             st.error("Service error.")
 
     except Exception as e:
-        st.error(f"System Error: {e
+        st.error(f"System Error: {e}")
+else:
+    # Landing Page Visual if no file is uploaded
+    st.divider()
+    c1, c2, c3 = st.columns(3)
+    c1.markdown("### 🔍\n**Smart Mapping**\nGemini identifies your columns automatically.")
+    c2.markdown("### 🧮\n**Precise Logic**\nPython ensures 100% accurate financial math.")
+    c3.markdown("### 🤖\n**AI Chat**\nLlama 3 answers business queries in real-time.")
