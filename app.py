@@ -4,16 +4,15 @@ import plotly.express as px
 import os
 from Truemetrics import configure_dual_engines, process_business_data, get_ai_response
 
-# 1. PAGE SETUP
+# 1. SETUP
 st.set_page_config(page_title="TrueMetrics | Intelligence", page_icon="🎯", layout="wide")
 
-# STYLE CONSTANTS
 ACCENT_BLUE = "#3B82F6"
 ACCENT_LIME = "#A3E635"
 GLASS_BG = "rgba(255, 255, 255, 0.03)"
 GLASS_BORDER = "rgba(255, 255, 255, 0.1)"
 
-# 2. UI STYLING
+# 2. THEME
 st.markdown(f"""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;800&display=swap');
@@ -45,46 +44,53 @@ st.markdown(f"""
     </style>
     """, unsafe_allow_html=True)
 
-# 3. INITIALIZATION
-g_client, m_client = configure_dual_engines(st.secrets.get("GROQ_API_KEY"), st.secrets.get("MISTRAL_API_KEY"))
+# 3. ENGINE INIT
+g_client, m_client = configure_dual_engines(
+    st.secrets.get("GROQ_API_KEY"), 
+    st.secrets.get("MISTRAL_API_KEY")
+)
 
-if "m" not in st.session_state: st.session_state.m = None
-if "chat" not in st.session_state: st.session_state.chat = []
+if "m" not in st.session_state: 
+    st.session_state.m = None
+if "chat" not in st.session_state: 
+    st.session_state.chat = []
 
 # --- HEADER ---
 if os.path.exists("logo.png"):
     st.image("logo.png", width=150)
 
-# --- APP LOGIC ---
+# --- APP FLOW ---
 if st.session_state.m is None:
+    st.markdown("<div style='height: 50px;'></div>", unsafe_allow_html=True)
     st.markdown("<h1 class='hero-text'>Precision Intelligence.</h1>", unsafe_allow_html=True)
-    up = st.file_uploader("Upload Data", type=["csv", "xlsx"])
+    up = st.file_uploader("Upload Data (CSV/XLSX)", type=["csv", "xlsx"])
     if up:
-        raw = pd.read_csv(up) if up.name.endswith('csv') else pd.read_excel(up)
-        m, _ = process_business_data(raw)
-        if "error" in m: st.error(m["error"])
-        else:
-            st.session_state.m = m
-            st.rerun()
+        try:
+            raw = pd.read_csv(up) if up.name.endswith('csv') else pd.read_excel(up)
+            m, _ = process_business_data(raw)
+            if "error" in m:
+                st.error(m["error"])
+            else:
+                st.session_state.m = m
+                st.rerun()
+        except Exception as e:
+            st.error(f"File Error: {e}")
 else:
     m = st.session_state.m
 
-    # A. DATA MAPPING PREVIEW
-    with st.expander("🔍 DATA MAPPING VERIFICATION", expanded=True):
+    # Verification Table
+    with st.expander("🔍 AI DATA MAPPING PREVIEW", expanded=True):
         if "mapping_preview" in m:
             st.table(pd.DataFrame(m["mapping_preview"]))
-        else:
-            st.warning("Mapping data not available.")
-
-    # B. KPI GRID
+    
+    # KPIs
     st.markdown("### Performance Matrix")
     k1, k2, k3, k4 = st.columns(4)
-    k1.metric("Revenue", f"{m['total_revenue']:,.0f} SAR")
-    k2.metric("Profit", f"{m['total_profit']:,.0f} SAR")
-    k3.metric("Margin", f"{m['margin_pct']}%")
-    k4.metric("Records", f"{m['total_units']:,}")
+    k1.metric("REVENUE", f"{m['total_revenue']:,.0f} SAR")
+    k2.metric("PROFIT", f"{m['total_profit']:,.0f} SAR")
+    k3.metric("MARGIN", f"{m['margin_pct']}%")
+    k4.metric("RECORDS", f"{m['total_units']:,}")
 
-    # C. VISUALS & CHAT
     st.markdown("<div style='height: 20px;'></div>", unsafe_allow_html=True)
     c_left, c_right = st.columns([1.5, 1])
 
@@ -92,8 +98,12 @@ else:
         st.markdown("<div class='glass-pane'>", unsafe_allow_html=True)
         if m.get('trend_data'):
             tdf = pd.DataFrame(m['trend_data'].items(), columns=['Date', 'Sales'])
-            fig = px.line(tdf, x='Date', y='Sales', title="Strategic Trend")
-            fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font_color='white')
+            fig = px.line(tdf, x='Date', y='Sales', title="Strategic Growth Trend")
+            fig.update_layout(
+                plot_bgcolor='rgba(0,0,0,0)', 
+                paper_bgcolor='rgba(0,0,0,0)', 
+                font_color='white'
+            )
             fig.update_traces(line_color=ACCENT_BLUE, line_width=4)
             st.plotly_chart(fig, use_container_width=True)
         st.markdown("</div>", unsafe_allow_html=True)
@@ -104,7 +114,8 @@ else:
         chat_box = st.container(height=300)
         with chat_box:
             for msg in st.session_state.chat:
-                with st.chat_message(msg["role"]): st.write(msg["content"])
+                with st.chat_message(msg["role"]): 
+                    st.write(msg["content"])
         
         if p := st.chat_input("Analyze..."):
             st.session_state.chat.append({"role": "user", "content": p})
@@ -115,4 +126,5 @@ else:
 
     if st.sidebar.button("Reset System"):
         st.session_state.m = None
+        st.session_state.chat = []
         st.rerun()
