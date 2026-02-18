@@ -1,74 +1,74 @@
 import streamlit as st
-import os
-import business_ai_mvp as mvp
+import google.generativeai as genai
+from business_ai_mvp import process_business_file, get_header_mapping, generate_insights, configure_ai
 
-st.set_page_config(page_title="Advanced Business Analyst", layout="wide")
+st.set_page_config(page_title="SME Growth Analyst", layout="wide")
 
-st.title("📊 Advanced Business Intelligence Dashboard")
+# Market-Ready UI
+st.markdown("""
+    <style>
+    [data-testid="stMetric"] { background-color: #1E3A8A !important; border-radius: 10px; padding: 15px; }
+    [data-testid="stMetricValue"] { color: white !important; font-weight: bold; }
+    [data-testid="stMetricLabel"] { color: #CBD5E1 !important; }
+    </style>
+    """, unsafe_allow_html=True)
 
-API_KEY = os.getenv("GEMINI_API_KEY")
-mvp.configure_ai(API_KEY)
-
-uploaded_file = st.file_uploader(
-    "Upload Sales / POS File (Excel or CSV)",
-    type=["csv","xlsx"]
-)
-
-if uploaded_file:
-    try:
-        df = mvp.process_business_file(uploaded_file)
-
-        st.subheader("📄 Cleaned Data Preview")
-        st.dataframe(df.head(20), use_container_width=True)
-
-        metrics = mvp.calculate_metrics(df)
-
-        # Core Metrics
-        st.subheader("📊 Core Financial Metrics")
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Revenue (SAR)", metrics["total_revenue"])
-        col2.metric("Profit (SAR)", metrics["total_profit"])
-        col3.metric("Gross Margin %", metrics["gross_margin_pct"])
-        col4.metric("VAT Due (15%)", metrics["vat_due"])
-
-        st.markdown("---")
-
-        # Detailed metrics
-        st.subheader("📌 KPIs & Product Insights")
-
-        with st.expander("📈 Top Revenue Products"):
-            st.table(metrics["top_revenue_products"])
-
-        with st.expander("💰 Top Profit Products"):
-            st.table(metrics["top_profit_products"])
-
-        if metrics["loss_making_products"]:
-            with st.expander("⚠️ Loss-Making Products"):
-                st.table(metrics["loss_making_products"])
-
-        if metrics.get("total_discount") is not None:
-            st.write(f"**Total Discount:** {metrics['total_discount']} SAR")
-            st.write(f"**Discount Rate:** {metrics['discount_rate_pct']} %")
-
-        with st.expander("📊 High Volume, Low Margin"):
-            st.table(metrics["high_volume_low_margin"])
-
-        st.markdown("---")
-
-        # AI Narrative
-        st.subheader("🤖 AI Business Insights")
-        ai_text = mvp.generate_ai_insights(metrics)
-        st.write(ai_text)
-
-    except Exception as e:
-        st.error("⚠️ Could not analyze file")
-        st.error(e)
-
+# API Secret Check
+if "GEMINI_API_KEY" in st.secrets:
+    ai_ready = configure_ai(st.secrets["GEMINI_API_KEY"])
 else:
-    st.info("Upload a sales / POS file to get started")
+    st.sidebar.warning("Add GEMINI_API_KEY to Secrets to enable AI tips.")
+    ai_ready = False
 
+st.title("📈 SME Growth Analyst")
+st.write("Professional Analysis for Retail & Business Data")
 
+file = st.file_uploader("Upload Transaction File", type=["csv", "xlsx"])
 
+if file:
+    df_raw = process_business_file(file)
+    if df_raw is not None:
+        # Hybrid Logic Start: 
+        # 1. Rule-based Mapping
+        mapping = get_header_mapping(list(df_raw.columns))
+        df_mapped = df_raw.rename(columns=mapping)
+        
+        # 2. Hardcoded Calculations
+        res = generate_insights(df_mapped)
 
+        # UI Metrics
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Total Revenue", f"{res['revenue']:,} SAR")
+        col2.metric("Net Profit", f"{res['profit']:,} SAR", f"{res['margin']}% Margin")
+        col3.metric("VAT (15%)", f"{res['vat']:,} SAR")
+        col4.metric("Cost Mode", "AI Estimate" if res['is_estimated'] else "Verified")
+
+        st.divider()
+
+        # Visuals and AI
+        c_left, c_right = st.columns([2, 1])
+        
+        with c_left:
+            st.subheader("Revenue by Category")
+            chart_data = res['df'].groupby(res['name_col'])['temp_rev'].sum().sort_values(ascending=False).head(10)
+            st.bar_chart(chart_data, color="#1E3A8A")
+
+        with c_right:
+            st.subheader("AI Strategic Advice")
+            if st.button("✨ Get Growth Tips"):
+                if ai_ready:
+                    with st.spinner("Generating insights..."):
+                        # Permanent 404 Fix: Fallback list
+                        for m_name in ['gemini-1.5-flash', 'gemini-pro']:
+                            try:
+                                model = genai.GenerativeModel(m_name)
+                                prompt = f"Business Summary: {res['revenue']} SAR Revenue, Best Product: {res['best_seller']}. Give 3 short tactical growth tips for this SME."
+                                response = model.generate_content(prompt)
+                                st.success(response.text)
+                                break
+                            except: continue
+                else: st.error("AI is not configured.")
+
+    else: st.error("Unsupported file format.")
 
 
