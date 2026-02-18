@@ -83,7 +83,7 @@ def get_ai_response(mistral_client, m, query):
     if not mistral_client: return "AI not connected."
     profile = m.get('data_profile', {})
     context = f"""
-    You are Sahm BI, a professional Saudi Business Consultant. 
+    You are the TrueMetrics Business Consultant, known for extreme precision and professional Saudi market insight. 
     Sales: {m.get('total_revenue', 0):,.0f} SAR | Profit: {m.get('total_profit', 0):,.0f} SAR | VAT: {m.get('vat_due', 0):,.0f} SAR | Units: {m.get('total_units', 0):,}
     Breakdown: Cities {profile.get('cities')} | Categories {profile.get('categories')}
     """
@@ -91,3 +91,4 @@ def get_ai_response(mistral_client, m, query):
         res = mistral_client.chat.complete(model="mistral-large-latest", messages=[{"role":"user", "content": f"{context}\nQuestion: {query}"}])
         return res.choices[0].message.content
     except: return "Analysing..."
+
