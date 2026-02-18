@@ -27,25 +27,24 @@ def process_business_file(uploaded_file):
         return None
 
 def gemini_get_schema(columns):
-    """Uses Gemini to identify which columns play which business roles."""
     try:
         model = genai.GenerativeModel('gemini-1.5-flash')
-        prompt = f"""
-        Analyze these columns: {list(columns)}
-        Identify the column names for these specific roles. Return ONLY a valid JSON:
-        {{
-            "product_col": "name of product or category column",
-            "revenue_col": "name of total sales/revenue column (or 'None')",
-            "profit_col": "name of profit column (or 'None')",
-            "price_col": "name of unit price column",
-            "qty_col": "name of quantity column"
-        }}
-        """
+        prompt = f"Map these columns: {list(columns)} to business roles. Return ONLY JSON: {{'product_col': '', 'revenue_col': '', 'profit_col': '', 'price_col': '', 'qty_col': ''}}"
         response = model.generate_content(prompt)
         json_match = re.search(r'\{.*\}', response.text, re.DOTALL)
-        return json.loads(json_match.group()) if json_match else None
+        if json_match:
+            return json.loads(json_match.group())
+        raise ValueError("No JSON found")
     except:
-        return None
+        # FALLBACK: If AI fails, we guess based on common names
+        cols = [c.lower() for c in columns]
+        return {
+            "product_col": columns[cols.index('product')] if 'product' in cols else columns[0],
+            "revenue_col": columns[cols.index('sales')] if 'sales' in cols else "None",
+            "profit_col": columns[cols.index('profit')] if 'profit' in cols else "None",
+            "price_col": columns[cols.index('price')] if 'price' in cols else "None",
+            "qty_col": columns[cols.index('quantity')] if 'quantity' in cols else "None"
+        }
 
 def calculate_precise_metrics(df, schema):
     """Deterministic math in Python - never wrong."""
@@ -92,3 +91,4 @@ def groq_get_insights(client, metrics):
         return completion.choices[0].message.content
     except Exception as e:
         return f"Consultant is currently unavailable: {str(e)}"
+
