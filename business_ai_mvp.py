@@ -1,114 +1,83 @@
 import pandas as pd
 import numpy as np
 import google.generativeai as genai
-from groq import Groq
-import json
-import re
+import json, re, difflib
 
-def configure_engines(gemini_key, groq_key):
-    try:
-        genai.configure(api_key=gemini_key)
-        return Groq(api_key=groq_key)
-    except: return None
+# 1. THE SCHEMA BIBLE (Add any common names you see in your datasets here)
+SCHEMA_MAP = {
+    "product_col": ["Product", "Item", "Category", "Sub Category", "Product Name", "Description", "Brand"],
+    "revenue_col": ["Sales", "Total Amount", "Total", "Revenue", "Amount", "Subtotal", "Price per Unit"], 
+    "profit_col": ["Profit", "Margin", "Earnings", "Net Profit", "Gain"],
+    "qty_col": ["Quantity", "Qty", "Count", "Units Sold", "Vol"]
+}
 
-def process_business_file(uploaded_file):
-    try:
-        df = pd.read_csv(uploaded_file, encoding='latin1') if uploaded_file.name.endswith('.csv') else pd.read_excel(uploaded_file)
-        # Standardize headers: No BOM, No extra spaces
-        df.columns = [str(c).replace('ï»¿', '').strip() for c in df.columns]
-        return df
-    except: return None
+def clean_column_names(df):
+    """Standardize headers: remove spaces, dots, and hidden characters."""
+    df.columns = [str(c).strip().replace('ï»¿', '') for c in df.columns]
+    return df
 
-def gemini_get_schema(columns):
-    """Uses Gemini to identify roles, with strict instructions to avoid IDs."""
+def find_best_column(actual_cols, target_key):
+    """Logic: 1. Direct Check -> 2. Fuzzy Match -> 3. None"""
+    possible_names = SCHEMA_MAP.get(target_key, [])
+    
+    # Step 1: Exact/Lowercase Match
+    for name in possible_names:
+        for col in actual_cols:
+            if col.lower() == name.lower():
+                return col
+                
+    # Step 2: Fuzzy Logic (difflib)
+    for name in possible_names:
+        matches = difflib.get_close_matches(name.lower(), [c.lower() for c in actual_cols], n=1, cutoff=0.8)
+        if matches:
+            # Return the original case version of the match
+            return next(c for c in actual_cols if c.lower() == matches[0])
+            
+    return None
+
+def ai_fallback_mapping(columns):
+    """The last resort: Ask the AI to guess based on business knowledge."""
     try:
         model = genai.GenerativeModel('gemini-1.5-flash')
-        prompt = f"""
-        Columns: {list(columns)}
-        Identify the BEST matching column for these roles. 
-        RULES:
-        - 'product_col': MUST be a category or item name (e.g., 'Product', 'Category'). NEVER choose an ID or Transaction number.
-        - 'revenue_col': The total sales amount. If no total column exists, return 'None'.
-        - 'profit_col': The profit column. If missing, return 'None'.
-        Return ONLY valid JSON:
-        {{
-            "product_col": "string",
-            "revenue_col": "string or 'None'",
-            "profit_col": "string or 'None'",
-            "price_col": "string or 'None'",
-            "qty_col": "string or 'None'"
-        }}
-        """
+        prompt = f"Columns: {list(columns)}. Return JSON with keys 'product_col', 'revenue_col', 'profit_col' matching these headers. NO IDs."
         response = model.generate_content(prompt)
-        json_match = re.search(r'\{.*\}', response.text, re.DOTALL)
-        return json.loads(json_match.group())
-    except: return None
+        return json.loads(re.search(r'\{.*\}', response.text, re.DOTALL).group())
+    except: return {}
 
-def calculate_precise_metrics(df, schema):
-    """Robust math that handles missing columns and text in numbers."""
+def robust_numeric_conversion(series):
+    """Turns '$1,200.50 SAR' into 1200.50."""
+    if series is None: return pd.Series([0.0])
+    # Remove everything except numbers, dots, and minus signs
+    clean = series.astype(str).str.replace(r'[^\d.-]', '', regex=True)
+    return pd.to_numeric(clean, errors='coerce').fillna(0.0)
+
+def process_and_calculate(df):
+    df = clean_column_names(df)
+    cols = df.columns
     
-    def get_col_safe(key_name):
-        """Finds the column name even if case is different."""
-        target = schema.get(key_name, "None")
-        if not target or target == "None": return None
-        # Case-insensitive match
-        for actual_col in df.columns:
-            if actual_col.lower() == target.lower():
-                return actual_col
-        return None
+    # Logic Phase
+    p_col = find_best_column(cols, "product_col")
+    r_col = find_best_column(cols, "revenue_col")
+    prof_col = find_best_column(cols, "profit_col")
+    
+    # AI Fallback Phase (if major columns are missing)
+    if not p_col or not r_col:
+        ai_guess = ai_fallback_mapping(cols)
+        p_col = p_col or ai_guess.get("product_col")
+        r_col = r_col or ai_guess.get("revenue_col")
+        prof_col = prof_col or ai_guess.get("profit_col")
 
-    def to_numeric_series(col_name):
-        if not col_name: return pd.Series([0.0]*len(df))
-        # Remove commas, currency symbols, and spaces, then convert
-        clean_s = df[col_name].astype(str).str.replace(r'[^\d.-]', '', regex=True)
-        return pd.to_numeric(clean_s, errors='coerce').fillna(0.0)
+    # Math Phase
+    df['_rev'] = robust_numeric_conversion(df[r_col] if r_col else None)
+    df['_prof'] = robust_numeric_conversion(df[prof_col] if prof_col else None)
+    
+    # If profit is missing, estimate it as 20% of revenue
+    if not prof_col or df['_prof'].sum() == 0:
+        df['_prof'] = df['_rev'] * 0.20
 
-    # 1. Identify Product Column (Filtering IDs)
-    p_col = get_col_safe("product_col")
-    if not p_col or any(x in p_col.lower() for x in ['id', 'number', 'transaction']):
-        # Fallback search for a better category column
-        for c in df.columns:
-            if any(x in c.lower() for x in ['product', 'category', 'item', 'type']) and 'id' not in c.lower():
-                p_col = c
-                break
-        if not p_col: p_col = df.columns[0]
-
-    # 2. Calculate Revenue
-    rev_col = get_col_safe("revenue_col")
-    if rev_col:
-        df['_rev'] = to_numeric_series(rev_col)
-    else:
-        # Fallback to Price * Qty
-        p_price = get_col_safe("price_col")
-        p_qty = get_col_safe("qty_col")
-        df['_rev'] = to_numeric_series(p_price) * to_numeric_series(p_qty)
-
-    # 3. Calculate Profit
-    prof_col = get_col_safe("profit_col")
-    if prof_col:
-        df['_prof'] = to_numeric_series(prof_col)
-    else:
-        df['_prof'] = df['_rev'] * 0.25 # 25% Margin Estimate
-
-    metrics = {
-        "rev": round(df['_rev'].sum(), 2),
-        "prof": round(df['_prof'].sum(), 2),
-        "vat": round(df['_rev'].sum() * 0.15, 2),
-        "best_seller": str(df.groupby(p_col)['_rev'].sum().idxmax()) if df['_rev'].sum() > 0 else "N/A",
-        "top_profit_prod": str(df.groupby(p_col)['_prof'].sum().idxmax()) if df['_prof'].sum() > 0 else "N/A",
+    return {
+        "revenue": df['_rev'].sum(),
+        "profit": df['_prof'].sum(),
+        "best_item": df.groupby(p_col)['_rev'].sum().idxmax() if p_col else "Unknown",
         "p_col": p_col
     }
-    return metrics, df
-
-def groq_get_insights(client, metrics):
-    try:
-        completion = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[
-                {"role": "system", "content": "You are a senior Saudi Business Consultant. Provide 3 high-level growth tips."},
-                {"role": "user", "content": f"Data: Revenue {metrics['rev']} SAR, Profit {metrics['prof']}, Top Item {metrics['best_seller']}. Recommend strategies."}
-            ],
-            temperature=0.5,
-        )
-        return completion.choices[0].message.content
-    except: return "Consultant currently analyzing data..."
