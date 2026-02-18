@@ -6,7 +6,10 @@ import re
 def configure_ai(api_key):
     if api_key:
         try:
-            genai.configure(api_key=api_key)
+            # This forces the stable v1 API version
+            import os
+            os.environ["GOOGLE_API_USE_MTLS_ENDPOINT"] = "never"
+            genai.configure(api_key=api_key, transport='rest') 
             return True
         except:
             return False
@@ -100,4 +103,5 @@ def generate_insights(df):
         }
     except Exception as e:
         return {"revenue": 0, "profit": 0, "margin": 0, "vat": 0, "best_seller": "Error", "most_profitable": "Error", "is_estimated": True, "df": df, "name_col": "N/A"}
+
 
