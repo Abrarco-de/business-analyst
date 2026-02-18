@@ -81,7 +81,8 @@ if file:
                         st.info(response.text)
                     except:
                         st.error("Model version mismatch. Please update the 'google-generativeai' library.")
-                 st.error("File is empty or corrupted.")
+                         st.error("File is empty or corrupted.")
+
 
 
 
