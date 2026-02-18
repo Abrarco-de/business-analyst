@@ -1,81 +1,62 @@
 import streamlit as st
 import pandas as pd
 import google.generativeai as genai
-# Import the engine functions
 from business_ai_mvp import process_business_file, generate_insights, configure_ai
 
-st.set_page_config(page_title="Visionary SME Analyst", layout="wide")
+st.set_page_config(page_title="SME Analyst Pro", layout="wide")
 
-# API Initialization
 if "GEMINI_API_KEY" in st.secrets:
     ai_status = configure_ai(st.secrets["GEMINI_API_KEY"])
 else:
     ai_status = False
 
-st.title("📈 Visionary SME Analyst")
-file = st.file_uploader("Upload Sales Data", type=["csv", "xlsx"])
+st.title("📈 SME Intelligence Analyst")
+
+file = st.file_uploader("Upload CSV/Excel", type=["csv", "xlsx"])
 
 if file:
     df_raw = process_business_file(file)
     if df_raw is not None:
-        # Sidebar for manual column correction
-        st.sidebar.header("🛠️ Column Mapping")
-        cols = list(df_raw.columns)
+        st.sidebar.header("⚙️ Settings")
+        all_cols = list(df_raw.columns)
         
-        # UI for user to pick the right columns
-        sel_prod = st.sidebar.selectbox("Product/Category Name Column", cols, index=0)
-        sel_rev = st.sidebar.selectbox("Revenue/Total Sales Column", cols, index=min(1, len(cols)-1))
-        sel_qty = st.sidebar.selectbox("Quantity Column", cols, index=min(2, len(cols)-1))
-        sel_prof = st.sidebar.selectbox("Profit Column (Optional)", ["None"] + cols)
+        # Allow user to fix the mapping
+        s_prod = st.sidebar.selectbox("Product Name Column", all_cols, index=0)
+        s_rev = st.sidebar.selectbox("Revenue Column", all_cols, index=min(1, len(all_cols)-1))
+        s_prof = st.sidebar.selectbox("Profit Column (Optional)", ["None"] + all_cols)
 
-        mapping = {
-            "product_name": sel_prod,
-            "total_amount": sel_rev,
-            "quantity": sel_qty,
-            "cost_price": sel_prof
-        }
-
-        # Calculate metrics using the engine
+        mapping = {"product_name": s_prod, "total_amount": s_rev, "cost_price": s_prof}
         res = generate_insights(df_raw, mapping)
 
-        # Dashboard Display
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Total Revenue", f"{res['revenue']:,} SAR")
-        m2.metric("Total Profit", f"{res['profit']:,} SAR")
-        m3.metric("Profit Margin", f"{res['margin']}%")
-        m4.metric("Best Seller", res['best_seller'])
+        # Dashboard Metrics
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Total Sales", f"{res['revenue']:,}")
+        c2.metric("Total Profit", f"{res['profit']:,}")
+        c3.metric("Margin", f"{res['margin']}%")
+        c4.metric("Top Item", res['best_seller'])
 
-        # Data Verification
-        with st.expander("🔍 Math Verification Table"):
-            st.write("Check if the app is cleaning your numbers correctly:")
-            check_df = pd.DataFrame({
-                "Original Value": df_raw[sel_rev].head(10),
-                "Cleaned Number": res['df']['temp_rev'].head(10)
+        # --- IMPORTANT: DEBUGGER ---
+        if res['revenue'] == 0:
+            st.error("⚠️ Data Error: All values are 0. Python could not read your numbers.")
+            st.write("Check below to see what happened:")
+            debug_df = pd.DataFrame({
+                "Your File Data": df_raw[s_rev].head(10),
+                "How Python Cleaned It": res['df']['temp_rev'].head(10)
             })
-            st.table(check_df)
+            st.table(debug_df)
 
         st.divider()
 
-        # Charts and AI
-        c1, c2 = st.columns([2, 1])
-        with c1:
-            st.subheader("Sales Performance")
-            if res['revenue'] > 0:
-                chart_data = res['df'].groupby(res['name_col'])['temp_rev'].sum().sort_values(ascending=False).head(10)
-                st.bar_chart(chart_data)
+        # AI Strategy
+        if st.button("✨ Generate AI Growth Strategy"):
+            if res['revenue'] > 0 and ai_status:
+                try:
+                    model = genai.GenerativeModel('gemini-1.5-flash')
+                    prompt = f"India SME: Revenue {res['revenue']}, Top Product {res['best_seller']}. Give 3 strategies."
+                    st.info(model.generate_content(prompt).text)
+                except: st.error("AI Busy.")
+                    
 
-        with c2:
-            st.subheader("AI Advice")
-            if st.button("✨ Get Growth Tips"):
-                if ai_status and res['revenue'] > 0:
-                    try:
-                        model = genai.GenerativeModel('gemini-1.5-flash')
-                        p = f"Business Revenue: {res['revenue']} SAR, Top Product: {res['best_seller']}. Give 3 growth tips."
-                        resp = model.generate_content(p)
-                        st.info(resp.text)
-                    except:
-                        st.error("AI Busy. Try again in 30 seconds.")
-                        
 
 
 
