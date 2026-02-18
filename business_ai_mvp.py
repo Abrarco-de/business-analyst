@@ -1,94 +1,66 @@
-import pandas as pd
+ import pandas as pd
 import numpy as np
 
+# -----------------------------
+# Load & clean business data
+# -----------------------------
+def process_business_file(file):
+    if file.name.endswith(".csv"):
+        df = pd.read_csv(file)
+    else:
+        df = pd.read_excel(file)
 
-REQUIRED_COLUMNS = [
-    "product_name",
-    "quantity",
-    "unit_price",
-    "cost_price"
-]
+    # Normalize column names
+    df.columns = [c.strip().lower().replace(" ", "_") for c in df.columns]
 
+    required = ["product_name", "quantity", "unit_price", "cost_price"]
 
-def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
-    df.columns = (
-        df.columns.str.lower()
-        .str.strip()
-        .str.replace(" ", "_")
-    )
+    for col in required:
+        if col not in df.columns:
+            raise ValueError(f"Missing column: {col}")
+
+    df["quantity"] = pd.to_numeric(df["quantity"], errors="coerce").fillna(0)
+    df["unit_price"] = pd.to_numeric(df["unit_price"], errors="coerce").fillna(0)
+    df["cost_price"] = pd.to_numeric(df["cost_price"], errors="coerce").fillna(0)
+
     return df
 
 
-def validate_schema(df: pd.DataFrame):
-    missing = [c for c in REQUIRED_COLUMNS if c not in df.columns]
-    if missing:
-        raise ValueError(f"Missing required columns: {missing}")
-
-
-def process_file(uploaded_file) -> pd.DataFrame:
-    if uploaded_file.name.endswith(".csv"):
-        df = pd.read_csv(uploaded_file)
-    else:
-        df = pd.read_excel(uploaded_file)
-
-    df = normalize_columns(df)
-    validate_schema(df)
-
-    # Type safety
-    for col in ["quantity", "unit_price", "cost_price"]:
-        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
-
+# -----------------------------
+# Business analytics engine
+# -----------------------------
+def generate_insights(df):
     df["revenue"] = df["quantity"] * df["unit_price"]
     df["cost"] = df["quantity"] * df["cost_price"]
     df["profit"] = df["revenue"] - df["cost"]
 
-    return df
+    total_revenue = round(df["revenue"].sum(), 2)
+    total_profit = round(df["profit"].sum(), 2)
+    margin = round((total_profit / total_revenue) * 100, 2) if total_revenue else 0
 
+    vat = round(total_revenue * 0.15, 2)
 
-def generate_metrics(df: pd.DataFrame) -> dict:
-    total_revenue = df["revenue"].sum()
-    total_cost = df["cost"].sum()
-    total_profit = df["profit"].sum()
-
-    gross_margin = (
-        (total_profit / total_revenue) * 100
-        if total_revenue > 0 else 0
+    top_products = (
+        df.groupby("product_name")["profit"]
+        .sum()
+        .sort_values(ascending=False)
+        .head(5)
     )
 
-    vat = total_revenue * 0.15  # KSA VAT
-
-    aov = total_revenue / df.shape[0] if df.shape[0] > 0 else 0
-
-    product_perf = (
-        df.groupby("product_name")
-        .agg({
-            "revenue": "sum",
-            "profit": "sum",
-            "quantity": "sum"
-        })
-        .sort_values("revenue", ascending=False)
-    )
-
-    top_revenue_product = product_perf.index[0]
-    top_profit_product = product_perf.sort_values("profit", ascending=False).index[0]
-
-    loss_products = product_perf[product_perf["profit"] < 0]
-
-    revenue_concentration = (
-        product_perf["revenue"].iloc[0] / total_revenue * 100
-        if total_revenue > 0 else 0
+    loss_products = (
+        df.groupby("product_name")["profit"]
+        .sum()
+        .sort_values()
+        .head(5)
     )
 
     return {
-        "total_revenue": round(total_revenue, 2),
-        "total_cost": round(total_cost, 2),
-        "total_profit": round(total_profit, 2),
-        "gross_margin": round(gross_margin, 2),
-        "vat": round(vat, 2),
-        "aov": round(aov, 2),
-        "top_revenue_product": top_revenue_product,
-        "top_profit_product": top_profit_product,
-        "loss_products": loss_products.reset_index(),
-        "product_perf": product_perf,
-        "revenue_concentration": round(revenue_concentration, 2),
+        "total_revenue": total_revenue,
+        "total_profit": total_profit,
+        "margin": margin,
+        "vat": vat,
+        "top_products": top_products,
+        "loss_products": loss_products,
     }
+
+
