@@ -1,19 +1,38 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import os
 from business_ai_mvp import configure_dual_engines, process_business_data, get_ai_response
 
-# Professional Branding
+# 1. Page Config
 st.set_page_config(page_title="Sahm BI | Intelligence", page_icon="📈", layout="wide")
 
-# Logo and Title Section
-col_logo, col_text = st.columns([1, 8])
+# Sahm BI Brand Colors
+SAHM_BLUE = "#1E3A8A"
+SAHM_GREEN = "#10B981"
+
+# Custom Styling for a Professional Look
+st.markdown(f"""
+    <style>
+    .stApp {{ background-color: #F9FAFB; }}
+    .stMetric {{ background-color: white; border-radius: 10px; padding: 15px; border-left: 5px solid {SAHM_BLUE}; box-shadow: 2px 2px 5px rgba(0,0,0,0.05); }}
+    [data-testid="stSidebar"] {{ background-color: #FFFFFF; border-right: 1px solid #E5E7EB; }}
+    h1, h2, h3 {{ color: {SAHM_BLUE} !important; }}
+    </style>
+    """, unsafe_allow_html=True)
+
+# 2. Logo & Branding Header
+col_logo, col_text = st.columns([1, 5])
+
 with col_logo:
-    # Use a professional arrow icon or your own image file
-    st.markdown("## 🏹") 
+    if os.path.exists("logo.png"):
+        st.image("logo.png", width=150)
+    else:
+        st.markdown(f"<h1 style='color: {SAHM_BLUE};'>🏹</h1>", unsafe_allow_html=True)
+
 with col_text:
     st.title("Sahm BI — سهم للذكاء الأعمال")
-    st.caption("Strategic Enterprise Analytics Platform")
+    st.markdown(f"<p style='font-size:18px; color:#4B5563; font-weight: 500;'>Strategic Enterprise Analytics for Saudi SMEs</p>", unsafe_allow_html=True)
 
 if "m" not in st.session_state: st.session_state.m = None
 if "chat" not in st.session_state: st.session_state.chat = []
@@ -22,7 +41,7 @@ g_client, m_client = configure_dual_engines(st.secrets.get("GROQ_API_KEY"), st.s
 
 if st.session_state.m is None:
     st.divider()
-    up = st.file_uploader("Upload Data (Supermart CSV)", type=["csv", "xlsx"])
+    up = st.file_uploader("Upload Business Intelligence Data (CSV/Excel)", type=["csv", "xlsx"])
     if up:
         raw = pd.read_csv(up) if up.name.endswith('csv') else pd.read_excel(up)
         m, _ = process_business_data(g_client, raw)
@@ -32,13 +51,18 @@ if st.session_state.m is None:
             st.rerun()
 else:
     m = st.session_state.m
-    if st.sidebar.button("🗑️ Reset Sahm BI"):
-        st.session_state.m = None
-        st.session_state.chat = []
-        st.rerun()
+    
+    with st.sidebar:
+        st.markdown(f"<h3 style='text-align: center;'>Control Panel</h3>", unsafe_allow_html=True)
+        if st.button("🗑️ Reset Sahm BI", use_container_width=True):
+            st.session_state.m = None
+            st.session_state.chat = []
+            st.rerun()
+        st.divider()
+        st.info("Sahm BI uses dual-engine AI to provide real-time Saudi tax and sales advice.")
 
     # --- KPI DASHBOARD ---
-    st.subheader("🏦 Financial Performance")
+    st.subheader("🏦 Executive Summary")
     k1, k2, k3, k4 = st.columns(4)
     k1.metric("Total Sales", f"{m.get('total_revenue', 0):,.0f} SAR")
     k2.metric("Total Profit", f"{m.get('total_profit', 0):,.0f} SAR")
@@ -50,22 +74,29 @@ else:
     # --- MARGINS ---
     col_a, col_b = st.columns(2)
     with col_a:
-        st.subheader("📉 Least Margin Items")
+        st.markdown(f"### 📉 Bottom Performers")
         for item in m.get('bot_margin_list', []): st.error(item)
     with col_b:
-        st.subheader("📈 Top Margin Items")
+        st.markdown(f"### 📈 Top Performers")
         for item in m.get('top_margin_list', []): st.success(item)
 
-    # --- TREND ---
+    # --- TREND CHART (Color Matched) ---
     if m.get('trend_data'):
         st.divider()
         tdf = pd.DataFrame(m['trend_data'].items(), columns=['Month', 'Sales'])
-        st.plotly_chart(px.line(tdf, x='Month', y='Sales', title="Sahm BI Revenue Trend", markers=True))
+        # Customizing the chart to Sahm BI colors
+        fig = px.line(tdf, x='Month', y='Sales', 
+                      title="📈 Sahm BI Revenue Performance", 
+                      markers=True,
+                      color_discrete_sequence=[SAHM_BLUE])
+        fig.update_layout(plot_bgcolor='white', paper_bgcolor='white')
+        fig.update_traces(line_width=3, marker=dict(size=8, color=SAHM_GREEN))
+        st.plotly_chart(fig, use_container_width=True)
 
     # --- CHAT ---
     st.markdown("""<style>.stPopover {position: fixed; bottom: 30px; right: 30px;}</style>""", unsafe_allow_html=True)
-    with st.popover("💬 Ask Sahm AI"):
-        st.info("Ask me about your VAT, Sales, or City performance.")
+    with st.popover("💬 Ask Sahm AI Consultant"):
+        st.markdown(f"<h4 style='color:{SAHM_BLUE};'>Business Advisor</h4>", unsafe_allow_html=True)
         for msg in st.session_state.chat:
             with st.chat_message(msg["role"]): st.write(msg["content"])
         
