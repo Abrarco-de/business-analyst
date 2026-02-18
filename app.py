@@ -1,5 +1,5 @@
 import streamlit as st
-import business_mvp as mvp
+import business_ai_mvp as mvp
 
 st.set_page_config(
     page_title="Saudi SME Intelligence",
@@ -37,6 +37,7 @@ if uploaded_file:
 
     except Exception as e:
         st.error(str(e))
+
 
 
 
