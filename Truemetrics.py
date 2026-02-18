@@ -32,23 +32,39 @@ def process_business_data(df_raw):
             
         df = df_raw.copy()
         
-        # 1. AGGRESSIVE COLUMN DETECTION
-        # Added Amount, Price, Total, Income, and Arabic المبيعات
-        rev_col = detect_col(df, ['Sales', 'Revenue', 'Amount', 'Total', 'Price', 'Income', 'المبيعات', 'البيع'])
-        
-        # Added Profit, Margin, Earnings, and Arabic الربح
-        prof_col = detect_col(df, ['Profit', 'Margin', 'Earnings', 'Net', 'Gain', 'الربح', 'صافي'])
-        
-        date_col = detect_col(df, ['Date', 'Time', 'Year', 'Month', 'Period', 'التاريخ'])
-        cat_col = detect_col(df, ['Category', 'Dept', 'Group', 'Type', 'الفئة'])
-        sub_cat_col = detect_col(df, ['Sub Category', 'Product', 'Item', 'Description', 'المنتج'])
-        city_col = detect_col(df, ['City', 'Region', 'Location', 'Branch', 'Area', 'المدينة'])
-        qty_col = detect_col(df, ['Qty', 'Quantity', 'Units', 'Count', 'Sold', 'الكمية']) 
+        # 1. Column Detection
+        mapping_details = []
+        detect_map = {
+            'Revenue': ['Sales', 'Revenue', 'Amount', 'Total', 'Price', 'Income', 'المبيعات'],
+            'Profit': ['Profit', 'Margin', 'Earnings', 'Net', 'Gain', 'الربح'],
+            'Date': ['Date', 'Time', 'Year', 'Month', 'Period', 'التاريخ'],
+            'Category': ['Category', 'Dept', 'Group', 'Type', 'الفئة'],
+            'Product': ['Sub Category', 'Product', 'Item', 'Description', 'المنتج'],
+            'City': ['City', 'Region', 'Location', 'Branch', 'Area', 'المدينة'],
+            'Quantity': ['Qty', 'Quantity', 'Units', 'Count', 'Sold', 'الكمية']
+        }
 
-        if not rev_col:
-            found_cols = ", ".join(df.columns.tolist())
-            return {"error": f"TrueMetrics could not find a Sales/Revenue column. Found columns: [{found_cols}]"}, df_raw
+        found_cols = {}
+        for key, keywords in detect_map.items():
+            actual_col = detect_col(df, keywords)
+            if actual_col:
+                found_cols[key] = actual_col
+                # Grab a sample value for the preview table
+                sample_val = df[actual_col].iloc[0]
+                mapping_details.append({"Logic": key, "Your Header": actual_col, "Sample Value": sample_val})
 
+        if 'Revenue' not in found_cols:
+            return {"error": "Could not find a Sales/Revenue column."}, df_raw
+
+        # ... (rest of your cleaning and aggregation logic remains the same) ...
+
+        # Add the mapping_details to your metrics dictionary
+        metrics = {
+            # ... (all your existing metrics) ...
+            "mapping_preview": mapping_details,
+            "total_revenue": float(df['_rev'].sum()), # etc...
+        }
+        return metrics, df
         # 2. Cleaning
         df['_rev'] = clean_num(df[rev_col])
         df['_prof'] = clean_num(df[prof_col]) if prof_col else df['_rev'] * 0.20
@@ -106,3 +122,4 @@ def get_ai_response(mistral_client, m, query):
         res = mistral_client.chat.complete(model="mistral-large-latest", messages=[{"role":"user", "content": f"{context}\nQuestion: {query}"}])
         return res.choices[0].message.content
     except: return "Analysing..."
+
