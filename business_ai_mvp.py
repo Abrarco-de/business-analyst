@@ -1,7 +1,7 @@
 import pandas as pd
 import google.generativeai as genai
 from groq import Groq
-import difflib
+import streamlit as st
 
 # --- 1. CONFIGURATION ---
 def configure_engines(gemini_key, groq_key):
@@ -10,73 +10,68 @@ def configure_engines(gemini_key, groq_key):
         return Groq(api_key=groq_key)
     except: return None
 
-# --- 2. ADVANCED COLUMN MAPPING ---
-SCHEMA_MAP = {
-    "product_col": ["Product", "Category", "Item", "Sub Category", "Description"],
-    "revenue_col": ["Sales", "Total Amount", "Revenue", "Amount", "Subtotal"],
-    "profit_col": ["Profit", "Margin", "Earnings", "Net Profit"],
-    "price_col": ["Price", "Unit Price", "Rate"],
-    "qty_col": ["Quantity", "Qty", "Count"]
-}
-
-def find_best_column(actual_cols, target_key):
-    possible_names = SCHEMA_MAP.get(target_key, [])
-    for name in possible_names:
-        for col in actual_cols:
-            if col.lower() == name.lower(): return col
-    return actual_cols[0] if actual_cols else None
-
-def robust_numeric(df, col_name):
-    if not col_name or col_name not in df.columns: return pd.Series([0.0]*len(df))
-    clean = df[col_name].astype(str).str.replace(r'[^\d.-]', '', regex=True)
-    return pd.to_numeric(clean, errors='coerce').fillna(0.0)
-
-# --- 3. METRIC CALCULATION ---
+# --- 2. CALCULATE ADVANCED SME METRICS ---
 def calculate_precise_metrics(df):
+    # Clean column names
     df.columns = [str(c).strip().replace('ï»¿', '') for c in df.columns]
-    p_col = find_best_column(df.columns, "product_col")
-    r_col = find_best_column(df.columns, "revenue_col")
-    prof_col = find_best_column(df.columns, "profit_col")
-    
-    df['_rev'] = robust_numeric(df, r_col)
-    df['_prof'] = robust_numeric(df, prof_col) if prof_col else df['_rev'] * 0.20
-    
+    cols = [c.lower() for c in df.columns]
+
+    # Smart column detection
+    r_col = next((c for c in df.columns if 'sale' in c.lower() or 'revenue' in c.lower() or 'amount' in c.lower()), df.columns[0])
+    p_col = next((c for c in df.columns if 'profit' in c.lower() or 'margin' in c.lower()), None)
+    prod_col = next((c for c in df.columns if 'product' in c.lower() or 'item' in c.lower() or 'category' in c.lower()), df.columns[0])
+
+    # Convert to numeric
+    df['_rev'] = pd.to_numeric(df[r_col].astype(str).str.replace(r'[^\d.-]', '', regex=True), errors='coerce').fillna(0)
+    if p_col:
+        df['_prof'] = pd.to_numeric(df[p_col].astype(str).str.replace(r'[^\d.-]', '', regex=True), errors='coerce').fillna(0)
+    else:
+        df['_prof'] = df['_rev'] * 0.25 # Assume 25% margin if not provided
+
     total_rev = df['_rev'].sum()
     total_prof = df['_prof'].sum()
-    
-    metrics = {
+
+    m = {
         "rev": round(total_rev, 2),
         "prof": round(total_prof, 2),
-        "vat": round(total_rev * 0.15, 2),
+        "vat": round(total_rev * 0.15, 2), # Saudi VAT 15%
         "margin": round((total_prof / total_rev * 100), 2) if total_rev > 0 else 0,
-        "best_seller": str(df.groupby(p_col)['_rev'].sum().idxmax()) if total_rev > 0 else "N/A",
-        "p_col": p_col
+        "best_seller": str(df.groupby(prod_col)['_rev'].sum().idxmax()) if total_rev > 0 else "N/A"
     }
-    return metrics, df
+    return m, df
 
-# --- 4. THE ROLE-SWAP BRIDGE ---
-def get_intelligent_answer(groq_client, df, user_query, metrics):
+# --- 3. SWAPPED INTELLIGENCE BRIDGE ---
+def get_intelligent_answer(groq_client, df, user_query, m):
     try:
-        # Step 1: Groq (Llama 3) researches the raw data
-        data_sample = df.head(100).to_string()
-        research_prompt = f"User asks: {user_query}. Data: {data_sample}. Extract only relevant numbers/facts."
+        # ROLE 1: Groq (Data Researcher) - High-speed data scanning
+        data_summary = df.head(100).to_string()
+        research_prompt = f"""
+        Analyze this data for query: {user_query}
+        Stats: Rev {m['rev']} SAR, Profit {m['prof']} SAR.
+        Data Sample:
+        {data_summary}
+        Return a 'Fact Sheet' with specific numbers and trends.
+        """
         
-        research_res = groq_client.chat.completions.create(
+        research = groq_client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[{"role": "user", "content": research_prompt}]
         )
-        fact_sheet = research_res.choices[0].message.content
+        fact_sheet = research.choices[0].message.content
 
-        # Step 2: Gemini (The Brain) gives the business advice
-        model = genai.GenerativeModel('gemini-3-flash')
-        gemini_prompt = f"""
+        # ROLE 2: Gemini (Executive Consultant) - High-level Saudi SME strategy
+        # Using the current 2026 stable model name
+        model = genai.GenerativeModel('gemini-3-flash') 
+        
+        consultant_prompt = f"""
         Fact Sheet: {fact_sheet}
-        SME Metrics: Revenue {metrics['rev']}, Margin {metrics['margin']}%
-        User Question: {user_query}
-        Provide a strategic business response for a Saudi-based SME.
+        Business Context: Total Revenue {m['rev']} SAR, Profit Margin {m['margin']}%.
+        Question: {user_query}
+        
+        Provide a concise, strategic answer. Mention SAR values and one actionable tip.
         """
-        response = model.generate_content(gemini_prompt)
+        response = model.generate_content(consultant_prompt)
         return response.text
-    except Exception as e:
-        return f"Intelligence Bridge Error: {str(e)}"
 
+    except Exception as e:
+        return f"System Error: {str(e)}"
