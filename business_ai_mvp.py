@@ -1,4 +1,4 @@
- import pandas as pd
+import pandas as pd
 import numpy as np
 
 # -----------------------------
@@ -62,5 +62,6 @@ def generate_insights(df):
         "top_products": top_products,
         "loss_products": loss_products,
     }
+
 
 
