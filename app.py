@@ -10,13 +10,17 @@ if "GEMINI_API_KEY" in st.secrets:
 st.title("📈 Visionary SME Analyst")
 file = st.file_uploader("Upload your sales file (CSV)", type=["csv"])
 
-if file:
-    df_raw = process_business_file(file)
-    if df_raw is not None:
-        # Step 1: Gemini decides the schema (Architecture)
-        with st.spinner("Gemini is mapping your data structure..."):
-            schema = gemini_schema_mapper(df_raw.columns)
+if uploaded_file:
+    df_raw = process_business_file(uploaded_file)
+    if df_raw is not None:  # <--- Check this!
+        mapping = get_header_mapping(list(df_raw.columns))
+        df_final = df_raw.rename(columns=mapping)
+        res = generate_insights(df_final)
         
+        if res is not None: # <--- Extra safety check
+            m1.metric("Revenue", f"{res['revenue']:,} SAR")
+        else:
+            st.error("Could not generate insights from this data.")
         # Step 2: Python calculates the insights (Logic Engine)
         res = generate_logic_insights(df_raw, schema)
 
@@ -41,5 +45,6 @@ if file:
         st.subheader("Top 10 Product Sales")
         chart_data = res['df'].groupby(res['p_col'])['_rev'].sum().sort_values(ascending=False).head(10)
         st.bar_chart(chart_data)
+
 
 
