@@ -68,7 +68,7 @@ def get_intelligent_answer(groq_client, df, user_query, metrics):
         fact_sheet = research_res.choices[0].message.content
 
         # Step 2: Gemini (The Brain) gives the business advice
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        model = genai.GenerativeModel('gemini-3-flash')
         gemini_prompt = f"""
         Fact Sheet: {fact_sheet}
         SME Metrics: Revenue {metrics['rev']}, Margin {metrics['margin']}%
@@ -79,3 +79,4 @@ def get_intelligent_answer(groq_client, df, user_query, metrics):
         return response.text
     except Exception as e:
         return f"Intelligence Bridge Error: {str(e)}"
+
