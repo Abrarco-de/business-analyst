@@ -1,9 +1,11 @@
 def get_intelligent_answer(groq_client, df, user_query, m):
     try:
-        # ROLE 1: Groq (Data Researcher)
-        # Groq doesn't have 404 naming issues, so we use it for the heavy lifting
-        data_summary = df.head(100).to_string()
-        research_prompt = f"Analyze for query: {user_query}. Data: {data_summary}"
+        import google.generativeai as genai
+        
+        # --- 1. RESEARCH (Groq) ---
+        # We use Groq for the research because it's reliable and fast.
+        data_sample = df.head(100).to_string()
+        research_prompt = f"Analyze for query: {user_query}. Data: {data_sample}"
         
         research = groq_client.chat.completions.create(
             model="llama-3.3-70b-versatile",
@@ -11,28 +13,26 @@ def get_intelligent_answer(groq_client, df, user_query, m):
         )
         fact_sheet = research.choices[0].message.content
 
-        # ROLE 2: Gemini (Consultant) - Updated for 2026
-        # We try the most stable 2026 IDs in order
-        target_models = ['gemini-2.5-flash', 'gemini-3-flash-preview', 'gemini-2.0-flash']
+        # --- 2. DYNAMIC MODEL DISCOVERY (Gemini) ---
+        # Instead of guessing the name, we find what's available
+        available_models = [m.name for m in genai.list_models() 
+                           if 'generateContent' in m.supported_generation_methods]
         
-        model = None
-        for model_id in target_models:
-            try:
-                model = genai.GenerativeModel(model_id)
-                # Test call to verify if model exists
-                model.generate_content("test", generation_config={"max_output_tokens": 1})
-                break 
-            except:
-                continue
+        # Pick the best one available (prioritizing Gemini 3 or 2.5)
+        selected_model = "gemini-1.5-flash" # Fallback default
+        for model_name in ["models/gemini-3-flash", "models/gemini-2.5-flash", "models/gemini-1.5-flash-latest"]:
+            if model_name in available_models:
+                selected_model = model_name
+                break
         
-        if not model:
-            return "AI Bridge Error: No compatible Gemini models found for your API key."
-
+        model = genai.GenerativeModel(selected_model)
+        
+        # --- 3. FINAL CONSULTATION ---
         consultant_prompt = f"""
         Fact Sheet: {fact_sheet}
-        Stats: Revenue {m['rev']} SAR, Profit {m['prof']} SAR.
+        SME Stats: Revenue {m['rev']} SAR, Profit {m['prof']} SAR.
         User: {user_query}
-        Provide a strategic Saudi business answer.
+        Provide a professional business answer for a Saudi SME.
         """
         response = model.generate_content(consultant_prompt)
         return response.text
