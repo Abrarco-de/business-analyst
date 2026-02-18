@@ -105,7 +105,7 @@ else:
     k2.metric("PROFIT", f"{m['total_profit']:,.0f} SAR")
     k3.metric("MARGIN", f"{m['margin_pct']}%")
     k4.metric("VAT (15%)", f"{m['vat_due']:,.0f} SAR")
-    k5.metric("RECORDS", f"{m['total_units']:,}")
+    k5.metric("units sold", f"{m['total_units']:,}")
 
     # Margin Alerts Row
     st.markdown("<div style='height: 20px;'></div>", unsafe_allow_html=True)
@@ -153,3 +153,4 @@ else:
         st.session_state.m = None
         st.session_state.chat = []
         st.rerun()
+
