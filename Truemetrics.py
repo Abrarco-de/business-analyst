@@ -20,6 +20,7 @@ def detect_col(df, keywords):
     cols = [str(c).strip() for c in df.columns]
     for k in keywords:
         for c in cols:
+            # Matches exact or partial (e.g., "Total Sales" matches "Sales")
             if k.lower() == c.lower() or k.lower() in c.lower():
                 return c
     return None
@@ -31,17 +32,22 @@ def process_business_data(df_raw):
             
         df = df_raw.copy()
         
-        # 1. Column Detection
-        rev_col = detect_col(df, ['Sales', 'Revenue', 'Amount'])
-        prof_col = detect_col(df, ['Profit', 'Margin'])
-        date_col = detect_col(df, ['Date', 'Order Date'])
-        cat_col = detect_col(df, ['Category'])
-        sub_cat_col = detect_col(df, ['Sub Category', 'Product'])
-        city_col = detect_col(df, ['City', 'Region'])
-        qty_col = detect_col(df, ['Qty', 'Quantity', 'Units']) 
+        # 1. AGGRESSIVE COLUMN DETECTION
+        # Added Amount, Price, Total, Income, and Arabic المبيعات
+        rev_col = detect_col(df, ['Sales', 'Revenue', 'Amount', 'Total', 'Price', 'Income', 'المبيعات', 'البيع'])
+        
+        # Added Profit, Margin, Earnings, and Arabic الربح
+        prof_col = detect_col(df, ['Profit', 'Margin', 'Earnings', 'Net', 'Gain', 'الربح', 'صافي'])
+        
+        date_col = detect_col(df, ['Date', 'Time', 'Year', 'Month', 'Period', 'التاريخ'])
+        cat_col = detect_col(df, ['Category', 'Dept', 'Group', 'Type', 'الفئة'])
+        sub_cat_col = detect_col(df, ['Sub Category', 'Product', 'Item', 'Description', 'المنتج'])
+        city_col = detect_col(df, ['City', 'Region', 'Location', 'Branch', 'Area', 'المدينة'])
+        qty_col = detect_col(df, ['Qty', 'Quantity', 'Units', 'Count', 'Sold', 'الكمية']) 
 
         if not rev_col:
-            return {"error": "Required column 'Sales' or 'Revenue' not found."}, df_raw
+            found_cols = ", ".join(df.columns.tolist())
+            return {"error": f"TrueMetrics could not find a Sales/Revenue column. Found columns: [{found_cols}]"}, df_raw
 
         # 2. Cleaning
         df['_rev'] = clean_num(df[rev_col])
@@ -49,10 +55,14 @@ def process_business_data(df_raw):
         df['_qty'] = clean_num(df[qty_col]) if qty_col else 1 
 
         # 3. Aggregations for AI
+        # Fallback to the first column if category/city aren't found
+        cat_key = cat_col if cat_col else df.columns[0]
+        city_key = city_col if city_col else (cat_col if cat_col else df.columns[0])
+
         profile = {
-            "categories": df.groupby(cat_col or df.columns[0])['_rev'].sum().to_dict(),
-            "cities": df.groupby(city_col or df.columns[0])['_rev'].sum().to_dict(),
-            "sub_cat_units": df.groupby(sub_cat_col or df.columns[0]).size().to_dict()
+            "categories": df.groupby(cat_key)['_rev'].sum().to_dict(),
+            "cities": df.groupby(city_key)['_rev'].sum().to_dict(),
+            "sub_cat_units": df.groupby(sub_cat_col or cat_key).size().to_dict()
         }
 
         # 4. Trend Logic
@@ -66,7 +76,7 @@ def process_business_data(df_raw):
                     monthly = df.dropna(subset=['_date']).set_index('_date')['_rev'].resample('M').sum()
                 trend_dict = {k.strftime('%Y-%m-%d'): float(v) for k, v in monthly.items()}
 
-        p_stats = df.groupby(sub_cat_col or df.columns[0]).agg({'_rev':'sum', '_prof':'sum'})
+        p_stats = df.groupby(sub_cat_col or cat_key).agg({'_rev':'sum', '_prof':'sum'})
         p_stats['m'] = (p_stats['_prof']/p_stats['_rev']*100).fillna(0)
 
         metrics = {
@@ -88,12 +98,11 @@ def get_ai_response(mistral_client, m, query):
     if not mistral_client: return "AI not connected."
     profile = m.get('data_profile', {})
     context = f"""
-    You are the TrueMetrics Business Intelligence AI. 
-    Metrics: Sales {m['total_revenue']:,} SAR, Profit {m['total_profit']:,} SAR, VAT {m['vat_due']:,} SAR, Units {m['total_units']:,}.
-    Details: Cities {profile.get('cities')}, Categories {profile.get('categories')}, Sub-cat Units {profile.get('sub_cat_units')}.
-    Instructions: Be precise, professional, and brief. Use the provided numbers to answer exactly.
+    You are TrueMetrics AI. 
+    Sales: {m['total_revenue']:,} SAR | Profit: {m['total_profit']:,} SAR | VAT: {m['vat_due']:,} SAR | Units: {m['total_units']:,}.
+    Details: {profile}
     """
     try:
         res = mistral_client.chat.complete(model="mistral-large-latest", messages=[{"role":"user", "content": f"{context}\nQuestion: {query}"}])
         return res.choices[0].message.content
-    except: return "Analysing precision data..."
+    except: return "Analysing..."
