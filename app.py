@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
-import business_mvp
+from business_ai_mvp import process_business_file, generate_insights
+
 import os
 
 
@@ -71,6 +72,7 @@ if uploaded_file:
         st.exception(e)
 else:
     st.info("Upload a file to begin analysis")
+
 
 
 
