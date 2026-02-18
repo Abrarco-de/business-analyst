@@ -104,5 +104,64 @@ def build_schema(columns: List[str]) -> Dict[str, str]:
 
     mapped_values = set(final_map.values())
 
-    if not valida
+    if not validate_schema(mapped_values):
+        raise ValueError(
+            "Dataset must contain at least:\n"
+            "- quantity + price OR\n"
+            "- quantity + sales OR\n"
+            "- sales\n"
+        )
+
+    return final_map
+
+
+# ================= FILE PROCESSOR =================
+def process_business_file(file) -> pd.DataFrame:
+    if file.name.endswith(".csv"):
+        df = pd.read_csv(file)
+    else:
+        df = pd.read_excel(file)
+
+    schema = build_schema(list(df.columns))
+    df = df.rename(columns=schema)
+
+    # Ensure numeric columns
+    for col in ["quantity", "price", "sales", "cost", "profit", "discount"]:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
+
+    return df
+
+
+# ================= INSIGHTS ENGINE (NO AI) =================
+def generate_insights(df: pd.DataFrame) -> Dict:
+    insights = {}
+
+    if "sales" not in df.columns:
+        df["sales"] = df.get("quantity", 1) * df.get("price", 0)
+
+    if "profit" not in df.columns:
+        cost = df.get("cost", 0)
+        df["profit"] = df["sales"] - (df.get("quantity", 1) * cost)
+
+    insights["total_revenue"] = round(df["sales"].sum(), 2)
+    insights["total_profit"] = round(df["profit"].sum(), 2)
+    insights["margin"] = round(
+        (insights["total_profit"] / insights["total_revenue"] * 100)
+        if insights["total_revenue"] > 0 else 0,
+        2
+    )
+
+    if "product_name" in df.columns:
+        insights["top_items"] = (
+            df.groupby("product_name")["sales"]
+            .sum()
+            .sort_values(ascending=False)
+            .head(5)
+            .to_dict()
+        )
+
+    insights["vat_due"] = round(insights["total_revenue"] * 0.15, 2)
+
+    return insights
 
