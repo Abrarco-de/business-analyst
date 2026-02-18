@@ -5,6 +5,16 @@ import os
 # Importing from your renamed logic file
 from Truemetrics import configure_dual_engines, process_business_data, get_ai_response
 
+#0 mapping ver
+# 1. MAPPING VERIFICATION
+    with st.expander("🔍 AI DATA MAPPING PREVIEW", expanded=True): # Changed to True to help debug
+        if "mapping_preview" in m and len(m["mapping_preview"]) > 0:
+            st.markdown("<p style='font-size:14px; color:#94a3b8;'>TrueMetrics matched your file headers to our logic:</p>", unsafe_allow_html=True)
+            pdf = pd.DataFrame(m["mapping_preview"])
+            st.table(pdf) # Using st.table instead of st.dataframe for better visibility in dark mode
+        else:
+            st.warning("AI Mapping is active, but no preview data was generated. Check your column headers.")
+
 # 1. PAGE CONFIGURATION
 st.set_page_config(
     page_title="TrueMetrics | Precision Intelligence", 
@@ -183,3 +193,4 @@ else:
             st.session_state.m = None
             st.session_state.chat = []
             st.rerun()
+
