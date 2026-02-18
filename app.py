@@ -37,7 +37,7 @@ st.markdown(f"""
     }}
     /* Sidebar styling */
     section[data-testid="stSidebar"] {{
-        background-color: white !important;
+        background-color: blue !important;
     }}
     </style>
     """, unsafe_allow_html=True)
@@ -133,3 +133,4 @@ else:
             ans = get_ai_response(m_client, m, p)
             st.session_state.chat.append({"role": "assistant", "content": ans})
             st.rerun()
+
