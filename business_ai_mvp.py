@@ -132,15 +132,47 @@ def get_intelligent_answer(groq_client, df, user_query, metrics):
         return f"Intelligence Bridge Error: {str(e)}"
 
 # --- 5. INITIAL INSIGHT GENERATOR ---
-def groq_get_insights(client, metrics):
+def get_intelligent_answer(groq_client, df, user_query, metrics):
     try:
-        completion = client.chat.completions.create(
+        # Try the most stable model name
+        try:
+            model = genai.GenerativeModel('gemini-1.5-flash-latest')
+        except:
+            model = genai.GenerativeModel('gemini-1.5-flash')
+        
+        summary_context = f"""
+        Stats: Revenue {metrics['rev']} SAR, Profit {metrics['prof']} SAR, Top Item: {metrics['best_seller']}
+        """
+
+        # We take a larger chunk of data but keep it clean
+        data_snapshot = df.head(100).to_string()
+        
+        research_prompt = f"""
+        User Question: "{user_query}"
+        {summary_context}
+        
+        Dataset Columns: {list(df.columns)}
+        Data Snapshot:
+        {data_snapshot}
+        
+        Extract ONLY the specific facts and numbers from the data that answer the question.
+        """
+        
+        response = model.generate_content(research_prompt)
+        fact_sheet = response.text
+
+        # Groq handles the strategy
+        analysis = groq_client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[
-                {"role": "system", "content": "You are a Saudi Business Consultant. Analyze the provided metrics and give 3 surgical growth tips. No generic advice."},
-                {"role": "user", "content": f"Revenue: {metrics['rev']}, Profit: {metrics['prof']}, Margin: {metrics['avg_margin']}%, Top Product: {metrics['best_seller']}."}
-            ]
+                {"role": "system", "content": "You are a Business Analyst. Use the Fact Sheet provided to answer the user query accurately."},
+                {"role": "user", "content": f"Fact Sheet: {fact_sheet}\n\nQuestion: {user_query}"}
+            ],
+            temperature=0.2
         )
-        return completion.choices[0].message.content
-    except: return "Consultant is busy with the numbers..."
+        return analysis.choices[0].message.content
+    except Exception as e:
+        # This will tell us if it's still a 404 or something else
+        return f"AI Bridge Error: {str(e)}"
+
 
