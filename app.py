@@ -1,49 +1,71 @@
 import streamlit as st
 import os
-import business_ai_mvp as mvp
+import business_mvp as mvp
 
-st.set_page_config(page_title="Business Analyst MVP", layout="wide")
+st.set_page_config(page_title="Advanced Business Analyst", layout="wide")
 
-# ---------- CONFIG ----------
+st.title("📊 Advanced Business Intelligence Dashboard")
+
 API_KEY = os.getenv("GEMINI_API_KEY")
 mvp.configure_ai(API_KEY)
 
-st.title("📊 AI Business Analyst")
-
 uploaded_file = st.file_uploader(
-    "Upload your POS / Sales file",
-    type=["csv", "xlsx"]
+    "Upload Sales / POS File (Excel or CSV)",
+    type=["csv","xlsx"]
 )
 
-# ---------- MAIN FLOW ----------
-if uploaded_file is not None:
+if uploaded_file:
     try:
-        # Step 1: Clean & normalize
-        df_final = mvp.process_business_file(uploaded_file)
+        df = mvp.process_business_file(uploaded_file)
 
         st.subheader("📄 Cleaned Data Preview")
-        st.dataframe(df_final.head(20))
+        st.dataframe(df.head(20), use_container_width=True)
 
-        # Step 2: Metrics
-        metrics = mvp.calculate_metrics(df_final)
+        metrics = mvp.calculate_metrics(df)
 
-        st.subheader("📈 Business Metrics")
-        c1, c2, c3, c4 = st.columns(4)
+        # Core Metrics
+        st.subheader("📊 Core Financial Metrics")
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Revenue (SAR)", metrics["total_revenue"])
+        col2.metric("Profit (SAR)", metrics["total_profit"])
+        col3.metric("Gross Margin %", metrics["gross_margin_pct"])
+        col4.metric("VAT Due (15%)", metrics["vat_due"])
 
-        c1.metric("Revenue", f"{metrics['total_revenue']} SAR")
-        c2.metric("Profit", f"{metrics['total_profit']} SAR")
-        c3.metric("Margin %", f"{metrics['gross_margin_pct']}%")
-        c4.metric("VAT Due", f"{metrics['vat_due']} SAR")
+        st.markdown("---")
 
-        # Step 3: AI Insights
+        # Detailed metrics
+        st.subheader("📌 KPIs & Product Insights")
+
+        with st.expander("📈 Top Revenue Products"):
+            st.table(metrics["top_revenue_products"])
+
+        with st.expander("💰 Top Profit Products"):
+            st.table(metrics["top_profit_products"])
+
+        if metrics["loss_making_products"]:
+            with st.expander("⚠️ Loss-Making Products"):
+                st.table(metrics["loss_making_products"])
+
+        if metrics.get("total_discount") is not None:
+            st.write(f"**Total Discount:** {metrics['total_discount']} SAR")
+            st.write(f"**Discount Rate:** {metrics['discount_rate_pct']} %")
+
+        with st.expander("📊 High Volume, Low Margin"):
+            st.table(metrics["high_volume_low_margin"])
+
+        st.markdown("---")
+
+        # AI Narrative
         st.subheader("🤖 AI Business Insights")
-        insight_text = mvp.generate_ai_insights(metrics)
-        st.write(insight_text)
+        ai_text = mvp.generate_ai_insights(metrics)
+        st.write(ai_text)
 
     except Exception as e:
-        st.error("❌ Error processing file")
-        st.code(str(e))
+        st.error("⚠️ Could not analyze file")
+        st.error(e)
 
+else:
+    st.info("Upload a sales / POS file to get started")
 
 
 
