@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
-import google.generativeai as genai
 from business_ai_mvp import process_business_file, get_header_mapping, generate_insights, configure_ai
+import google.generativeai as genai
 
 st.set_page_config(page_title="Visionary SME Analyst", layout="wide")
 
@@ -10,73 +10,54 @@ if "GEMINI_API_KEY" in st.secrets:
 else:
     ai_status = False
 
-st.title("📊 SME Business Intelligence")
+st.title("📊 SME Business Intelligence (ZATCA Compliant)")
 
-file = st.file_uploader("Upload your CSV (Supermart, Sales-Data, or Retail)", type=["csv"])
+file = st.file_uploader("Upload your CSV", type=["csv"])
 
 if file:
     df = process_business_file(file)
     if df is not None:
-        # Auto-detect headers
         auto_map = get_header_mapping(df.columns)
-        
-        st.sidebar.header("🛠️ Column Verification")
-        st.sidebar.info("We automatically detected these columns. Adjust if needed:")
-        
+        st.sidebar.header("⚙️ Column Mapping")
         cols = list(df.columns)
-        # Helper to find default column index
-        def find_idx(std_key, default_i):
-            for k, v in auto_map.items():
-                if v == std_key: return cols.index(k)
-            return default_i
 
-        sel_prod = st.sidebar.selectbox("Product/Category", cols, index=find_idx("product_name", 2))
-        sel_rev = st.sidebar.selectbox("Revenue/Sales", ["Price * Quantity"] + cols, index=find_idx("total_amount", 0)+1 if "total_amount" in auto_map.values() else 0)
-        sel_prof = st.sidebar.selectbox("Profit (Optional)", ["Auto-Calculate"] + cols, index=find_idx("profit", 0)+1 if "profit" in auto_map.values() else 0)
+        sel_prod = st.sidebar.selectbox("Product Column", cols, index=0)
+        sel_rev = st.sidebar.selectbox("Revenue Column", ["Calculate (Price*Qty)"] + cols, index=0)
+        sel_prof = st.sidebar.selectbox("Profit Column", ["Auto-Estimate"] + cols, index=0)
 
-        # Build manual map
-        manual_map = {"product_name": sel_prod}
-        if sel_rev != "Price * Quantity": manual_map["total_amount"] = sel_rev
-        else:
-            # Need to find Price and Quantity for the multiplication
-            manual_map["unit_price"] = auto_map.get("unit_price", cols[3] if len(cols)>3 else None)
-            manual_map["quantity"] = auto_map.get("quantity", cols[4] if len(cols)>4 else None)
-        
-        if sel_prof != "Auto-Calculate": manual_map["profit"] = sel_prof
+        m_map = {"product_name": sel_prod}
+        if sel_rev != "Calculate (Price*Qty)": m_map["total_amount"] = sel_rev
+        if sel_prof != "Auto-Estimate": m_map["profit"] = sel_prof
 
-        # Process
-        res = generate_insights(df, manual_map)
+        res = generate_insights(df, m_map)
 
-        # Show Metrics
-        m1, m2, m3, m4 = st.columns(4)
+        # Dashboard Metrics
+        m1, m2, m3 = st.columns(3)
         m1.metric("Total Revenue", f"{res['revenue']:,.2f} SAR")
-        m2.metric("Net Profit", f"{res['profit']:,.2f} SAR")
-        m3.metric("Profit Margin", f"{res['margin']}%")
-        m4.metric("Best Seller", res['best_seller'])
-
-        # Validation Table
-        with st.expander("🔍 Math Verification"):
-            st.write("Confirming row-by-row math:")
-            st.dataframe(res['df'][[sel_prod, 'calculated_revenue']].head(10))
+        m2.metric("Total Profit", f"{res['profit']:,.2f} SAR")
+        m3.metric("ZATCA VAT (15%)", f"{res['zatca_vat']:,.2f} SAR")
 
         st.divider()
 
-        # AI and Chart
+        c1, c2 = st.columns(2)
+        c1.info(f"🏆 **Best Seller (Revenue):** {res['best_seller']}")
+        c2.success(f"💰 **Most Profitable Item:** {res['most_profitable_prod']}")
+
+        st.divider()
+
+        # Visuals
         left, right = st.columns([2,1])
         with left:
-            st.subheader("Top Performers")
+            st.subheader("Product Performance (Revenue)")
             chart_data = res['df'].groupby(res['p_col'])['calculated_revenue'].sum().sort_values(ascending=False).head(10)
-            st.bar_chart(chart_data, color="#1E3A8A")
+            st.bar_chart(chart_data)
 
         with right:
-            st.subheader("AI Strategic Advice")
-            if st.button("✨ Generate Strategy"):
+            st.subheader("AI Growth Strategy")
+            if st.button("✨ Ask Gemini"):
                 if ai_status and res['revenue'] > 0:
-                    try:
-                        model = genai.GenerativeModel('gemini-1.5-flash')
-                        p = f"Business Revenue: {res['revenue']} SAR. Profit: {res['profit']}. Top Item: {res['best_seller']}. Give 3 growth tips."
-                        st.success(model.generate_content(p).text)
-                    except: st.error("AI Busy. Please wait 15 seconds.")
-
+                    model = genai.GenerativeModel('gemini-1.5-flash')
+                    prompt = f"Revenue: {res['revenue']} SAR. Top Profit Maker: {res['most_profitable_prod']}. 3 growth tips."
+                    st.write(model.generate_content(prompt).text)
 
 
