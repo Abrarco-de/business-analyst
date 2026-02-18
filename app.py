@@ -4,16 +4,14 @@ from business_ai_mvp import process_business_file, get_header_mapping, generate_
 
 st.set_page_config(page_title="Visionary SME Analyst", layout="wide")
 
-# API Configuration
 if "GEMINI_API_KEY" in st.secrets:
     ai_status = configure_ai(st.secrets["GEMINI_API_KEY"])
 else:
-    st.sidebar.error("Set API Key in Secrets!")
+    st.sidebar.error("Key missing!")
     ai_status = False
 
 st.title("📈 Visionary SME Analyst")
-
-file = st.file_uploader("Upload Sales File", type=["csv", "xlsx"])
+file = st.file_uploader("Upload Data", type=["csv", "xlsx"])
 
 if file:
     df_raw = process_business_file(file)
@@ -22,33 +20,38 @@ if file:
         df_mapped = df_raw.rename(columns=mapping)
         res = generate_insights(df_mapped)
 
-        # DEBUG SECTION (Helpful for you to see why it might be 0)
-        with st.expander("🛠️ System Debug: How I see your data"):
-            st.write("Columns detected:", list(df_raw.columns))
-            st.write("Matched Schema:", mapping)
-            st.dataframe(df_mapped.head(3))
-
-        # Metrics
+        # ROW 1: METRICS
         m1, m2, m3, m4 = st.columns(4)
         m1.metric("Revenue", f"{res['revenue']:,} SAR")
-        m2.metric("Profit", f"{res['profit']:,} SAR", f"{res['margin']}%")
-        m3.metric("VAT", f"{res['vat']:,} SAR")
-        m4.metric("Status", "Calculated")
+        m2.metric("Net Profit", f"{res['profit']:,} SAR")
+        m3.metric("Margin", f"{res['margin']}%")
+        m4.metric("Top Product", res['best_seller'])
 
         st.divider()
 
-        # AI Advice
-        if st.button("✨ Get AI Growth Strategy"):
+        # ROW 2: CHART & AI
+        col_left, col_right = st.columns([2, 1])
+        with col_left:
+            st.subheader("Sales Performance")
             if res['revenue'] > 0:
-                model = genai.GenerativeModel('gemini-1.5-flash')
-                prompt = f"Business has {res['revenue']} SAR revenue. Best product: {res['best_seller']}. Give 3 India-specific growth tips."
-                try:
-                    resp = model.generate_content(prompt)
-                    st.success(resp.text)
-                except: st.error("AI busy. Try again.")
-            else:
-                st.warning("Cannot give advice because Revenue is 0. Please check the 'System Debug' above to see if columns matched.")
+                chart_data = res['df'].groupby(res['name_col'])['temp_rev'].sum().sort_values(ascending=False).head(10)
+                st.bar_chart(chart_data)
         
+        with col_right:
+            st.subheader("AI Strategic Advice")
+            if st.button("✨ Analyze Business"):
+                if res['revenue'] > 0 and ai_status:
+                    with st.spinner("Gemini is thinking..."):
+                        try:
+                            model = genai.GenerativeModel('gemini-1.5-flash')
+                            prompt = f"Business Revenue: {res['revenue']} SAR. Profit: {res['profit']} SAR. Top Product: {res['best_seller']}. Give 3 short, professional growth tips."
+                            resp = model.generate_content(prompt)
+                            st.info(resp.text)
+                        except Exception as e:
+                            st.error("AI is overloaded. Please wait 10 seconds and click again.")
+                else:
+                    st.warning("Please ensure data is loaded correctly (Revenue > 0).")
+
 
 
 
