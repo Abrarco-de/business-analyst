@@ -32,29 +32,51 @@ def process_business_data(df_raw):
             
         df = df_raw.copy()
         
-        # 1. Column Detection
+        # --- NEW: This list MUST be created here ---
         mapping_details = []
+        
+        # Column Detection Keywords
         detect_map = {
             'Revenue': ['Sales', 'Revenue', 'Amount', 'Total', 'Price', 'Income', 'المبيعات'],
             'Profit': ['Profit', 'Margin', 'Earnings', 'Net', 'Gain', 'الربح'],
             'Date': ['Date', 'Time', 'Year', 'Month', 'Period', 'التاريخ'],
-            'Category': ['Category', 'Dept', 'Group', 'Type', 'الفئة'],
-            'Product': ['Sub Category', 'Product', 'Item', 'Description', 'المنتج'],
-            'City': ['City', 'Region', 'Location', 'Branch', 'Area', 'المدينة'],
-            'Quantity': ['Qty', 'Quantity', 'Units', 'Count', 'Sold', 'الكمية']
+            'City': ['City', 'Region', 'Location', 'Branch', 'Area', 'المدينة']
         }
 
+        # Track what we find
         found_cols = {}
         for key, keywords in detect_map.items():
-            actual_col = detect_col(df, keywords)
+            actual_col = detect_col(df, keywords) # Uses your detect_col function
             if actual_col:
                 found_cols[key] = actual_col
                 # Grab a sample value for the preview table
                 sample_val = df[actual_col].iloc[0]
-                mapping_details.append({"Logic": key, "Your Header": actual_col, "Sample Value": sample_val})
+                mapping_details.append({
+                    "AI Interpretation": key, 
+                    "Your Header": actual_col, 
+                    "Example Data": str(sample_val)
+                })
 
         if 'Revenue' not in found_cols:
             return {"error": "Could not find a Sales/Revenue column."}, df_raw
+
+        # ... (rest of your cleaning/logic code) ...
+
+        # --- IMPORTANT: Ensure mapping_preview is in this dictionary ---
+        metrics = {
+            "mapping_preview": mapping_details,  # <--- THIS IS WHAT APP.PY LOOKS FOR
+            "total_revenue": float(df['_rev'].sum()),
+            "total_profit": float(df['_prof'].sum()),
+            "total_units": int(df['_qty'].sum()) if '_qty' in df else 0,
+            "vat_due": float(df['_rev'].sum() * 0.15),
+            "margin_pct": round((df['_prof'].sum()/df['_rev'].sum()*100), 1) if df['_rev'].sum() > 0 else 0,
+            "bot_margin_list": [], 
+            "top_margin_list": [],
+            "trend_data": {} 
+        }
+        return metrics, df
+    except Exception as e:
+        return {"error": f"Engine Error: {str(e)}"}, df_raw
 
         # ... (rest of your cleaning and aggregation logic remains the same) ...
 
@@ -122,4 +144,5 @@ def get_ai_response(mistral_client, m, query):
         res = mistral_client.chat.complete(model="mistral-large-latest", messages=[{"role":"user", "content": f"{context}\nQuestion: {query}"}])
         return res.choices[0].message.content
     except: return "Analysing..."
+
 
