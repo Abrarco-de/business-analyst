@@ -164,4 +164,84 @@ def generate_insights(df: pd.DataFrame) -> Dict:
     insights["vat_due"] = round(insights["total_revenue"] * 0.15, 2)
 
     return insights
+    # ================= ADVANCED METRICS ENGINE =================
+def calculate_metrics(df: pd.DataFrame) -> Dict:
+    metrics = {}
+
+    # --- Ensure required computed columns ---
+    if "sales" not in df.columns:
+        df["sales"] = df.get("quantity", 1) * df.get("price", 0)
+
+    if "profit" not in df.columns:
+        cost = df.get("cost", 0)
+        df["profit"] = df["sales"] - (df.get("quantity", 1) * cost)
+
+    # --- Core Totals ---
+    metrics["total_revenue"] = round(df["sales"].sum(), 2)
+    metrics["total_profit"] = round(df["profit"].sum(), 2)
+
+    metrics["gross_margin_pct"] = round(
+        (metrics["total_profit"] / metrics["total_revenue"]) * 100
+        if metrics["total_revenue"] > 0 else 0,
+        2
+    )
+
+    metrics["vat_due"] = round(metrics["total_revenue"] * 0.15, 2)
+
+    # --- Order-Level ---
+    metrics["average_order_value"] = round(
+        metrics["total_revenue"] / max(len(df), 1), 2
+    )
+
+    # --- Product-Level Intelligence ---
+    if "product_name" in df.columns:
+        grouped = df.groupby("product_name").agg({
+            "sales": "sum",
+            "profit": "sum",
+            "quantity": "sum"
+        }).reset_index()
+
+        grouped["margin_pct"] = (
+            grouped["profit"] / grouped["sales"] * 100
+        ).replace([float("inf"), -float("inf")], 0).fillna(0)
+
+        metrics["top_revenue_items"] = (
+            grouped.sort_values("sales", ascending=False)
+            .head(5)[["product_name", "sales"]]
+            .to_dict("records")
+        )
+
+        metrics["top_profit_items"] = (
+            grouped.sort_values("profit", ascending=False)
+            .head(5)[["product_name", "profit"]]
+            .to_dict("records")
+        )
+
+        metrics["loss_making_items"] = (
+            grouped[grouped["profit"] < 0]
+            .sort_values("profit")
+            .head(5)[["product_name", "profit"]]
+            .to_dict("records")
+        )
+
+        metrics["high_volume_low_margin"] = (
+            grouped[
+                (grouped["quantity"] > grouped["quantity"].median()) &
+                (grouped["margin_pct"] < grouped["margin_pct"].median())
+            ][["product_name", "quantity", "margin_pct"]]
+            .to_dict("records")
+        )
+
+    # --- Discount Impact ---
+    if "discount" in df.columns:
+        metrics["total_discount"] = round(df["discount"].sum(), 2)
+        metrics["discount_ratio_pct"] = round(
+            (metrics["total_discount"] / metrics["total_revenue"]) * 100
+            if metrics["total_revenue"] > 0 else 0,
+            2
+        )
+
+    return metrics
+
+
 
