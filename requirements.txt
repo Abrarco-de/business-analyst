@@ -3,3 +3,4 @@ google-generativeai
 groq
 pandas
 openpyxl
+plotly
