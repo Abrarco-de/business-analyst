@@ -1,79 +1,86 @@
 import pandas as pd
 import numpy as np
-import re
+import google.generativeai as genai
+import json
+
+def configure_ai(api_key):
+    if not api_key: return False
+    try:
+        genai.configure(api_key=api_key, transport='rest')
+        return True
+    except: return False
 
 def process_business_file(uploaded_file):
     try:
-        if uploaded_file.name.endswith('.csv'):
-            df = pd.read_csv(uploaded_file, encoding='latin1')
-        else:
-            df = pd.read_excel(uploaded_file)
+        df = pd.read_csv(uploaded_file, encoding='latin1') if uploaded_file.name.endswith('.csv') else pd.read_excel(uploaded_file)
         df.columns = [str(c).replace('ï»¿', '').strip() for c in df.columns]
         return df
-    except:
-        return None
+    except: return None
 
-def get_mapped_data(df):
-    """Detects and cleans columns for Supermart, Sales-Data, and Retail files."""
-    cols = df.columns
-    
-    # 1. Detect Product Column
-    p_options = ["Product Category", "Product", "Sub Category", "Category", "item"]
-    p_col = next((c for c in cols if any(opt.lower() in c.lower() for opt in p_options)), cols[0])
-    
-    # 2. Aggressive Cleaning Helper
-    def clean_num(c):
-        if c is None or c not in df.columns: return pd.Series([0.0]*len(df))
+def gemini_schema_mapper(columns):
+    """Gemini decides the schema once at the start."""
+    try:
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        prompt = f"""
+        Analyze these spreadsheet columns: {list(columns)}
+        Identify which column matches these business needs. Return ONLY a JSON object:
+        {{
+            "product_col": "exact column name for product/category",
+            "revenue_col": "exact column name for total sales/amount",
+            "profit_col": "exact column name for profit (or 'None')",
+            "price_col": "exact column name for unit price (if no total sales col)",
+            "qty_col": "exact column name for quantity"
+        }}
+        """
+        response = model.generate_content(prompt)
+        # Clean the response text to ensure it's valid JSON
+        clean_json = response.text.replace('```json', '').replace('```', '').strip()
+        return json.loads(clean_json)
+    except:
+        # Fallback if Gemini is busy
+        return {"product_col": columns[0], "revenue_col": columns[-1], "profit_col": "None"}
+
+def generate_logic_insights(df, schema):
+    """Pure Python Logic - No AI Busy errors here."""
+    def to_num(c):
+        if not c or c not in df.columns or c == "None": return pd.Series([0.0]*len(df))
         return pd.to_numeric(df[c].astype(str).str.replace(r'[^\d.]', '', regex=True), errors='coerce').fillna(0.0)
 
-    # 3. Detect Revenue (Total Amount vs Price*Qty)
-    r_col = next((c for c in cols if any(x in c.lower() for x in ["total amount", "sales", "revenue"])), None)
-    
-    if r_col:
-        df['_calc_rev'] = clean_num(r_col)
+    # 1. Revenue & Profit Math
+    if schema.get("revenue_col") and schema["revenue_col"] in df.columns:
+        df['_rev'] = to_num(schema["revenue_col"])
     else:
-        pr_col = next((c for c in cols if "price" in c.lower()), None)
-        qty_col = next((c for c in cols if "qty" in c.lower() or "quant" in c.lower()), None)
-        df['_calc_rev'] = clean_num(pr_col) * clean_num(qty_col)
+        df['_rev'] = to_num(schema.get("price_col")) * to_num(schema.get("qty_col"))
 
-    # 4. Detect Profit
-    f_col = next((c for c in cols if "profit" in c.lower()), None)
-    if f_col:
-        df['_calc_prof'] = clean_num(f_col)
+    if schema.get("profit_col") and schema["profit_col"] != "None":
+        df['_prof'] = to_num(schema["profit_col"])
     else:
-        df['_calc_prof'] = df['_calc_rev'] * 0.25 # 25% fallback
-        
-    return df, p_col
+        df['_prof'] = df['_rev'] * 0.25 # Default 25% margin
 
-def calculate_metrics(df, p_col):
-    """Calculates ZATCA VAT and highest profit product."""
-    total_rev = df['_calc_rev'].sum()
-    total_prof = df['_calc_prof'].sum()
+    # 2. Key Metrics
+    total_rev = df['_rev'].sum()
+    total_prof = df['_prof'].sum()
+    p_col = schema["product_col"]
     
-    # Best Seller & Most Profitable
-    best_seller = "N/A"
-    most_profitable = "N/A"
-    if total_rev > 0:
-        best_seller = str(df.groupby(p_col)['_calc_rev'].sum().idxmax())
-        most_profitable = str(df.groupby(p_col)['_calc_prof'].sum().idxmax())
+    best_seller = df.groupby(p_col)['_rev'].sum().idxmax() if total_rev > 0 else "N/A"
+    most_profitable = df.groupby(p_col)['_prof'].sum().idxmax() if total_prof > 0 else "N/A"
+
+    # 3. Code-Generated Text Insights
+    top_share = (df.groupby(p_col)['_rev'].sum().max() / total_rev * 100) if total_rev > 0 else 0
+    
+    insights = [
+        f"✅ **Revenue Leader:** {best_seller} accounts for {top_share:.1f}% of total revenue.",
+        f"✅ **ZATCA (15% VAT):** Estimated tax liability is {total_rev * 0.15:,.2f} SAR.",
+        f"✅ **Profitability:** Your business is currently operating at a { (total_prof/total_rev*100) if total_rev > 0 else 0:.1f}% net margin."
+    ]
 
     return {
-        "revenue": round(total_rev, 2),
-        "profit": round(total_prof, 2),
-        "zatca": round(total_rev * 0.15, 2),
-        "margin": round((total_prof/total_rev*100), 1) if total_rev > 0 else 0,
+        "revenue": total_rev,
+        "profit": total_prof,
+        "vat": total_rev * 0.15,
         "best_seller": best_seller,
-        "top_profit_prod": most_profitable
+        "most_profitable": most_profitable,
+        "insights": insights,
+        "df": df,
+        "p_col": p_col
     }
-
-def get_code_insights(metrics, df, p_col):
-    """Text insights generated purely by Python logic."""
-    top_rev = df.groupby(p_col)['_calc_rev'].sum().max()
-    share = round((top_rev / metrics['revenue'] * 100), 1) if metrics['revenue'] > 0 else 0
-    
-    return [
-        f"✅ **Revenue Leader:** {metrics['best_seller']} generates {share}% of your total income.",
-        f"✅ **ZATCA Estimate:** You should set aside **{metrics['zatca']:,} SAR** for 15% VAT.",
-        f"✅ **Profitability:** Your current operation is yielding a **{metrics['margin']}%** margin."
-    ]
-    
