@@ -20,76 +20,58 @@ def process_business_file(uploaded_file):
         return df
     except: return None
 
-def get_header_mapping(columns):
-    # Rule-based detection
-    schema_hints = {
-        "product_name": ["item", "product", "category", "sub", "name", "desc"],
-        "unit_price": ["price", "rate", "unit"],
-        "quantity": ["qty", "quantity", "count", "units", "sold"],
-        "total_amount": ["total", "sales", "revenue", "net", "amount"],
-        "cost_price": ["cost", "purchase", "buying", "profit"]
-    }
-    mapping = {}
-    for col in columns:
-        clean_col = str(col).lower().strip().replace(" ", "_")
-        for std, hints in schema_hints.items():
-            if any(h in clean_col for h in hints):
-                mapping[col] = std
-                break
-    return mapping
-
 def generate_insights(df, mapping_overrides=None):
-    """
-    Calculates metrics. mapping_overrides allows manual selection from UI.
-    """
     try:
-        # Use manual selection if provided, else use auto-mapping
         col_map = mapping_overrides if mapping_overrides else {}
         
-        def get_col(std_name):
-            return col_map.get(std_name, std_name)
+        # --- AGGRESSIVE NUMERIC CLEANING ---
+        def clean_and_convert(col_name):
+            if col_name not in df.columns: 
+                return pd.Series([0.0]*len(df))
+            
+            # Convert to string, remove currency symbols, commas, and whitespace
+            series = df[col_name].astype(str)
+            series = series.str.replace(r'[^\d.]', '', regex=True)
+            
+            # Handle empty strings resulting from cleaning
+            series = pd.to_numeric(series, errors='coerce').fillna(0.0)
+            return series
 
-        def to_num(col_name):
-            if col_name not in df.columns: return pd.Series([0.0]*len(df))
-            series = df[col_name]
-            if series.dtype == 'object':
-                series = series.astype(str).str.replace(r'[^\d.]', '', regex=True)
-            return pd.to_numeric(series, errors='coerce').fillna(0.0)
+        # Get column names from mapping
+        prod_col = col_map.get("product_name", df.columns[0])
+        rev_col = col_map.get("total_amount", df.columns[1])
+        qty_col = col_map.get("quantity", df.columns[2])
+        prof_col = col_map.get("cost_price", "None")
 
-        # CORE MATH
-        rev_col = get_col("total_amount")
-        qty_col = get_col("quantity")
+        # Calculations
+        qty_data = clean_and_convert(qty_col)
+        rev_data = clean_and_convert(rev_col)
         
-        qty = to_num(qty_col)
-        rev = to_num(rev_col) if rev_col in df.columns else (to_num(get_col("unit_price")) * qty)
+        # If Revenue is 0 but we have Price, calculate it
+        if rev_data.sum() == 0 and "unit_price" in col_map:
+            price_data = clean_and_convert(col_map["unit_price"])
+            rev_data = price_data * qty_data
+
+        df['temp_rev'] = rev_data
+        total_rev = float(rev_data.sum())
         
-        df['temp_rev'] = rev
-        total_rev = float(rev.sum())
-        
-        # Profit Logic: If user picked 'Profit' column, use it. Else 35% estimate.
-        profit_col = get_col("cost_price")
-        if profit_col in df.columns:
-            total_profit = float(to_num(profit_col).sum())
+        # Profit Logic
+        if prof_col != "None" and prof_col in df.columns:
+            total_profit = float(clean_and_convert(prof_col).sum())
         else:
-            total_profit = total_rev * 0.35
-
-        # Best Seller
-        name_col = get_col("product_name")
-        best_seller = "N/A"
-        if name_col in df.columns and total_rev > 0:
-            best_seller = df.groupby(name_col)['temp_rev'].sum().idxmax()
+            total_profit = total_rev * 0.35 # Standard 35% margin fallback
 
         return {
             "revenue": round(total_rev, 2),
             "profit": round(total_profit, 2),
             "margin": round((total_profit/total_rev*100), 2) if total_rev > 0 else 0,
-            "best_seller": best_seller,
-            "name_col": name_col,
-            "df": df
+            "best_seller": df.groupby(prod_col)['temp_rev'].sum().idxmax() if total_rev > 0 else "N/A",
+            "name_col": prod_col,
+            "df": df,
+            "raw_rev_check": rev_data.head(5).tolist() # For debugging
         }
-    except:
-        return {"revenue":0, "profit":0, "margin":0, "best_seller":"N/A", "name_col":"None", "df":df}
-
-
+    except Exception as e:
+        return {"revenue":0, "profit":0, "margin":0, "best_seller":"Error", "df":df, "error": str(e)}
+        
 
 
