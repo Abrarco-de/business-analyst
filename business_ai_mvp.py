@@ -103,12 +103,37 @@ def calculate_precise_metrics(df):
 
 def groq_get_insights(client, metrics):
     try:
+        # Create a detailed data string for the AI to "chew" on
+        data_summary = f"""
+        - Total Revenue: {metrics['rev']} SAR
+        - Total Profit: {metrics['prof']} SAR
+        - Net Margin: {round((metrics['prof']/metrics['rev'])*100, 2) if metrics['rev'] > 0 else 0}%
+        - Top Product by Revenue: {metrics['best_seller']}
+        - Top Product by Profit: {metrics['top_profit_prod']}
+        - Estimated VAT Liability: {metrics['vat']} SAR
+        """
+
+        # Detailed instructions to avoid generic advice
+        system_prompt = """
+        You are a Senior Strategic Business Analyst specializing in the Saudi retail market. 
+        Your task is to analyze the provided metrics and give 3 UNIQUE, data-specific insights.
+        
+        RULES:
+        1. NO generic advice like 'improve marketing' or 'save costs'.
+        2. If 'Best Seller' is different from 'Top Profit Maker', analyze why (Volume vs Margin).
+        3. Mention the specific product names and numbers provided.
+        4. Focus on the 'Margin Gap' or 'VAT Impact' if relevant.
+        5. Use a professional, executive tone.
+        """
+
         completion = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[
-                {"role": "system", "content": "You are a professional Saudi Business Analyst."},
-                {"role": "user", "content": f"Revenue: {metrics['rev']} SAR, Profit: {metrics['prof']} SAR, Top Item: {metrics['best_seller']}. Give 3 strategic growth tips."}
-            ]
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": f"Here is the business performance data: {data_summary}. Provide a surgical growth strategy."}
+            ],
+            temperature=0.3, # Lower temperature = more factual/logical
         )
         return completion.choices[0].message.content
-    except: return "Consultant is reviewing the data..."
+    except Exception as e:
+        return f"Analyst is busy: {str(e)}"
