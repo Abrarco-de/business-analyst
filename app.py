@@ -2,67 +2,52 @@ import streamlit as st
 import pandas as pd
 from business_ai_mvp import configure_dual_engines, process_business_data, get_ai_response
 
-# 1. UI Configuration
 st.set_page_config(page_title="Visionary SME AI", layout="wide")
 
-st.markdown("""
-    <style>
-    .stApp { background-color: #0A0F1E; color: #E2E8F0; }
-    [data-testid="metric-container"] {
-        background: rgba(30, 41, 59, 0.7);
-        border: 1px solid #334155;
-        padding: 1.5rem;
-        border-radius: 12px;
-    }
-    </style>
-    """, unsafe_allow_html=True)
+# Sidebar Keys
+with st.sidebar:
+    st.header("🔑 AI Setup")
+    g_client, m_client = configure_dual_engines(st.secrets["GROQ_API_KEY"], st.secrets["MISTRAL_API_KEY"])
+    if not g_client: st.error("API Keys missing in secrets.toml")
 
-# 2. State Management
+# State Initialize
 if "messages" not in st.session_state: st.session_state.messages = []
-if "data_ready" not in st.session_state: st.session_state.data_ready = False
+if "m" not in st.session_state: st.session_state.m = None
 
-# 3. Engines
-g_client, m_client = configure_dual_engines(st.secrets["GROQ_API_KEY"], st.secrets["MISTRAL_API_KEY"])
+# 1. File Upload & Processing
+uploaded_file = st.file_uploader("Upload Business Data", type=["csv", "xlsx"])
 
-# 4. Main Interface
-st.title("💎 Visionary SME AI")
-st.caption("Dual-Agent Strategy: Groq Cleaning + Mistral Intelligence")
+if uploaded_file and st.session_state.m is None:
+    df_raw = pd.read_csv(uploaded_file) if uploaded_file.name.endswith('csv') else pd.read_excel(uploaded_file)
+    with st.spinner("Cleaning data..."):
+        m, df_final = process_business_data(g_client, df_raw)
+        st.session_state.m = m
+        st.session_state.df_final = df_final
 
-uploaded_file = st.file_uploader("Upload Daily Sales/Finance File", type=["csv", "xlsx"])
-
-if uploaded_file:
-    if not st.session_state.data_ready:
-        df_raw = pd.read_csv(uploaded_file) if uploaded_file.name.endswith('csv') else pd.read_excel(uploaded_file)
-        with st.spinner("Agents are syncing data..."):
-            m, df_final = process_business_data(g_client, df_raw)
-            st.session_state.m = m
-            st.session_state.df_final = df_final
-            st.session_state.data_ready = True
-
+# 2. Display Advanced Metrics
+if st.session_state.m:
     m = st.session_state.m
-    
-    # Advanced Metrics Grid
-    c1, c2, c3, c4 = st.columns(4)
+    c1, c2, c3 = st.columns(3)
     c1.metric("Revenue (SAR)", f"{m['rev']:,}")
     c2.metric("Net Profit", f"{m['prof']:,}")
-    c3.metric("Margin %", f"{m['margin']}%")
-    c4.metric("VAT Liability", f"{m['vat']:,}")
+    c3.metric("Best Products", m['best_product'].split(',')[0]) # Shows top 1
 
+    # 3. Chatbot
     st.divider()
-
-    # Chatbot with Data Exchange
-    st.subheader("💬 Executive Consulting")
-    chat_container = st.container(height=400, border=True)
-
     for msg in st.session_state.messages:
-        with chat_container.chat_message(msg["role"]): st.markdown(msg["content"])
+        with st.chat_message(msg["role"]): st.write(msg["content"])
 
-    if prompt := st.chat_input("Ask: Why is my margin low? or How to increase sales?"):
+    if prompt := st.chat_input("How can I increase my profit?"):
         st.session_state.messages.append({"role": "user", "content": prompt})
-        with chat_container.chat_message("user"): st.markdown(prompt)
+        with st.chat_message("user"): st.write(prompt)
         
-        with chat_container.chat_message("assistant"):
-            with st.spinner("Mistral is thinking..."):
-                response = get_ai_response(m_client, m, st.session_state.df_final, prompt)
-                st.markdown(response)
-                st.session_state.messages.append({"role": "assistant", "content": response})
+        # --- GATEKEEPER FOR SMALL TALK ---
+        greetings = ["thank", "shukran", "hi", "hello", "hey"]
+        if any(x in prompt.lower() for x in greetings):
+            response = "You're welcome! What else can I check in your data?"
+        else:
+            with st.chat_message("assistant"):
+                response = get_ai_response(m_client, st.session_state.m, st.session_state.df_final, prompt)
+                st.write(response)
+        
+        st.session_state.messages.append({"role": "assistant", "content": response})
