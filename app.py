@@ -2,6 +2,11 @@ import streamlit as st
 import pandas as pd
 import business_mvp
 import os
+
+
+st.write("CWD:", os.getcwd())
+st.write("FILES:", os.listdir())
+
 st.write("Files in directory:", os.listdir())
 df = business_mvp.process_file(uploaded_file)
 metrics = business_mvp.generate_metrics(df)
@@ -66,5 +71,6 @@ if uploaded_file:
         st.exception(e)
 else:
     st.info("Upload a file to begin analysis")
+
 
 
