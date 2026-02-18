@@ -48,14 +48,14 @@ if file:
         # Visuals and AI
         c_left, c_right = st.columns([2, 1])
         
-        with c_left:
-    st.subheader("Revenue by Category")
+          with c_left:
+            st.subheader("Revenue by Category")
     
-    # ADVANCED LOGIC: Check if data exists to avoid crashes
-    if not res['df'].empty:
-        try:
+        # ADVANCED LOGIC: Check if data exists to avoid crashes
+             if not res['df'].empty:
+               try:
             # Ensure the grouping column exists and sum the revenue
-            chart_data = (
+               chart_data = (
                 res['df']
                 .groupby(res['name_col'])['temp_rev']
                 .sum()
@@ -89,6 +89,7 @@ if file:
                 else: st.error("AI is not configured.")
 
     else: st.error("Unsupported file format.")
+
 
 
 
