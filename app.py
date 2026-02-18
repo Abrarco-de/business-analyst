@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import os
-from business_ai_mvp import configure_dual_engines, process_business_data, get_ai_response
+from Truemetrics import configure_dual_engines, process_business_data, get_ai_response
 
 # 1. Page Config
 st.set_page_config(page_title="TrueMetrics | Precision BI", page_icon="🎯", layout="wide")
@@ -158,3 +158,4 @@ else:
             ans = get_ai_response(m_client, m, p)
             st.session_state.chat.append({"role": "assistant", "content": ans})
             st.rerun()
+
