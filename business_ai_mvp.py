@@ -42,19 +42,19 @@ def process_business_data(groq_client, df):
     return m, df
 
 # 3. THE STRATEGIST (Mistral)
-def get_ai_response(mistral_client, metrics, user_query):
+# business_ai_mvp.py
+
+# Ensure this function signature has EXACTLY these 4 parameters
+def get_ai_response(mistral_client, metrics, df, user_query):
     try:
-        # We pass the 'best_product' calculation directly to Mistral's brain
+        # We now have the 'df' available to look for specific product details!
         prompt = f"""
-        CONTEXT: Saudi SME. Revenue: {metrics['rev']} SAR. Profit: {metrics['prof']} SAR.
-        TOP PROFIT PRODUCTS: {metrics['best_product']}
+        CONTEXT: Saudi SME. Revenue: {metrics['rev']} SAR.
+        TOP PRODUCTS: {metrics['best_product']}
         
-        USER: {user_query}
+        USER QUESTION: {user_query}
         
-        INSTRUCTIONS: 
-        1. Be extremely brief (max 3 sentences).
-        2. If asked about best products, use the data above.
-        3. Do NOT provide a summary unless asked.
+        INSTRUCTION: Answer in 1-2 sentences. Use the data provided.
         """
         
         response = mistral_client.chat.complete(
@@ -63,4 +63,4 @@ def get_ai_response(mistral_client, metrics, user_query):
         )
         return response.choices[0].message.content
     except Exception as e:
-        return f"AI Insight Error: {str(e)}"
+        return f"AI Error: {str(e)}"
