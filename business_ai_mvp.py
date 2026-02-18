@@ -2,17 +2,18 @@ import pandas as pd
 
 # ---------- COLUMN ALIASES ----------
 COLUMN_MAP = {
-    "product_name": ["product", "item", "item_name", "product_name", "menu_item", "description", "name"],
-    "quantity": ["qty", "quantity", "count", "units", "sold_qty"],
-    "unit_price": ["price", "unit_price", "selling_price", "rate", "amount"],
-    "cost_price": ["cost", "cost_price", "buy_price", "purchase_price"],
-    "timestamp": ["date", "time", "timestamp", "created_at", "sale_date"]
+    "product_name": ["product", "item", "item_name", "menu_item", "description", "name"],
+    "quantity": ["qty", "quantity", "units", "count"],
+    "unit_price": ["price", "unit_price", "rate"],
+    "sales": ["sales", "revenue", "total_sales", "amount"],
+    "profit": ["profit", "net_profit", "margin_value"],
+    "discount": ["discount", "discount_amount"],
 }
 
 # ---------- UTIL ----------
-def find_column(df, possible_names):
+def find_column(df, aliases):
     for col in df.columns:
-        if col.lower().strip() in possible_names:
+        if col.lower().strip() in aliases:
             return col
     return None
 
@@ -31,33 +32,41 @@ def process_business_file(uploaded_file):
         if found:
             schema[standard] = found
 
-    if "unit_price" not in schema or "quantity" not in schema:
-        raise ValueError("File must contain at least price and quantity columns")
-
     df = df.rename(columns={v: k for k, v in schema.items()})
 
-    # Defaults if missing
     if "product_name" not in df:
         df["product_name"] = "Unknown Item"
-
-    if "cost_price" not in df:
-        df["cost_price"] = 0
-
-    df["quantity"] = pd.to_numeric(df["quantity"], errors="coerce").fillna(0)
-    df["unit_price"] = pd.to_numeric(df["unit_price"], errors="coerce").fillna(0)
-    df["cost_price"] = pd.to_numeric(df["cost_price"], errors="coerce").fillna(0)
 
     return df
 
 # ---------- ANALYTICS ----------
 def generate_insights(df):
-    df["revenue"] = df["unit_price"] * df["quantity"]
-    df["cost"] = df["cost_price"] * df["quantity"]
-    df["profit"] = df["revenue"] - df["cost"]
+    # ---------- CASE 1: POS already gives sales + profit ----------
+    if "sales" in df.columns and "profit" in df.columns:
+        df["sales"] = pd.to_numeric(df["sales"], errors="coerce").fillna(0)
+        df["profit"] = pd.to_numeric(df["profit"], errors="coerce").fillna(0)
+        df["discount"] = pd.to_numeric(df.get("discount", 0), errors="coerce").fillna(0)
 
-    total_revenue = round(df["revenue"].sum(), 2)
-    total_profit = round(df["profit"].sum(), 2)
-    margin = round((total_profit / total_revenue * 100), 2) if total_revenue else 0
+        total_revenue = round(df["sales"].sum(), 2)
+        total_profit = round(df["profit"].sum(), 2)
+        margin = round((total_profit / total_revenue * 100), 2) if total_revenue else 0
+
+    # ---------- CASE 2: Need to calculate ----------
+    elif "unit_price" in df.columns and "quantity" in df.columns:
+        df["unit_price"] = pd.to_numeric(df["unit_price"], errors="coerce").fillna(0)
+        df["quantity"] = pd.to_numeric(df["quantity"], errors="coerce").fillna(0)
+        df["sales"] = df["unit_price"] * df["quantity"]
+        df["profit"] = df["sales"]  # cost unknown
+
+        total_revenue = round(df["sales"].sum(), 2)
+        total_profit = round(df["profit"].sum(), 2)
+        margin = 0
+
+    else:
+        raise ValueError(
+            "File must contain either (sales + profit) OR (price + quantity)"
+        )
+
     vat = round(total_revenue * 0.15, 2)
 
     top_products = (
