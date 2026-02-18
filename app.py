@@ -37,14 +37,12 @@ if st.session_state.m:
     
     # FINANCIAL CARDS
     st.subheader("💰 Financial Overview")
-    c1, c2, c3, c4, c5,c6 = st.columns(5)
+    c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("Total Revenue", f"{m['total_revenue']:,} SAR")
     c2.metric("Total Profit", f"{m['total_profit']:,} SAR")
     c3.metric("Gross Margin", f"{m['gross_margin_pct']}%")
     c4.metric("VAT (15%)", f"{m['vat_due']:,} SAR")
-    c5.metric("Avg Trans.", f"{m['avg_transaction']:,} SAR")
-    # Add this to your Metric Grid in app.py
-    c6.metric("Weakest Margin Item", m.get('least_margin_name', 'N/A').split('(')[0])
+    c5.metric("Weakest Margin Item", m.get('least_margin_name', 'N/A').split('(')[0])
 
     st.divider()
 
@@ -78,4 +76,5 @@ if st.session_state.m:
             ans = get_ai_response(m_client, st.session_state.m, p)
             st.session_state.chat_history.append({"role": "assistant", "content": ans})
             st.rerun()
+
 
