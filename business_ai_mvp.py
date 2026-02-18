@@ -15,39 +15,69 @@ def configure_engines(gemini_key, groq_key):
 
 def process_business_file(uploaded_file):
     try:
-        # Handling CSV and Excel with Latin-1 encoding for broader compatibility
         if uploaded_file.name.endswith('.csv'):
             df = pd.read_csv(uploaded_file, encoding='latin1')
         else:
             df = pd.read_excel(uploaded_file)
-        # Clean BOM and whitespace from headers
         df.columns = [str(c).replace('ï»¿', '').strip() for c in df.columns]
         return df
     except:
         return None
 
 def gemini_get_schema(columns):
+    """Uses Gemini to identify column roles with a strict filter against IDs."""
     try:
         model = genai.GenerativeModel('gemini-1.5-flash')
-        prompt = f"Map these columns: {list(columns)} to business roles. Return ONLY JSON: {{'product_col': '', 'revenue_col': '', 'profit_col': '', 'price_col': '', 'qty_col': ''}}"
+        prompt = f"""
+        Analyze these columns: {list(columns)}
+        
+        Identify the correct column names for these roles. 
+        CRITICAL RULE: For 'product_col', you MUST choose a descriptive column like 'Category', 'Sub Category', or 'Product'. 
+        NEVER choose 'Order ID', 'Transaction ID', or any column containing 'ID', 'Date', or 'Time'.
+        
+        Return ONLY a valid JSON:
+        {{
+            "product_col": "exact name of product or category column",
+            "revenue_col": "exact name of total sales/revenue column (or 'None')",
+            "profit_col": "exact name of profit column (or 'None')",
+            "price_col": "exact name of unit price column",
+            "qty_col": "exact name of quantity column"
+        }}
+        """
         response = model.generate_content(prompt)
         json_match = re.search(r'\{.*\}', response.text, re.DOTALL)
         if json_match:
-            return json.loads(json_match.group())
-        raise ValueError("No JSON found")
+            schema = json.loads(json_match.group())
+            # Secondary Safety Check: If AI still picked an ID, manually override
+            p_low = schema['product_col'].lower()
+            if 'id' in p_low or 'transaction' in p_low or 'order' in p_low:
+                raise ValueError("AI picked an ID column")
+            return schema
+        return None
     except:
-        # FALLBACK: If AI fails, we guess based on common names
-        cols = [c.lower() for c in columns]
+        # ULTIMATE FALLBACK: Search for keywords manually if AI fails
+        cols_list = list(columns)
+        cols_lower = [c.lower() for c in cols_list]
+        
+        # Priority list for Product Column
+        p_col = cols_list[0]
+        for target in ['category', 'product', 'sub category', 'item', 'description']:
+            for i, name in enumerate(cols_lower):
+                if target in name and 'id' not in name:
+                    p_col = cols_list[i]
+                    break
+            else: continue
+            break
+            
         return {
-            "product_col": columns[cols.index('product')] if 'product' in cols else columns[0],
-            "revenue_col": columns[cols.index('sales')] if 'sales' in cols else "None",
-            "profit_col": columns[cols.index('profit')] if 'profit' in cols else "None",
-            "price_col": columns[cols.index('price')] if 'price' in cols else "None",
-            "qty_col": columns[cols.index('quantity')] if 'quantity' in cols else "None"
+            "product_col": p_col,
+            "revenue_col": cols_list[cols_lower.index('sales')] if 'sales' in cols_lower else "None",
+            "profit_col": cols_list[cols_lower.index('profit')] if 'profit' in cols_lower else "None",
+            "price_col": "None",
+            "qty_col": "None"
         }
 
 def calculate_precise_metrics(df, schema):
-    """Deterministic math in Python - never wrong."""
     def to_f(c):
         if not c or c not in df.columns or c == "None": 
             return pd.Series([0.0]*len(df))
@@ -63,14 +93,14 @@ def calculate_precise_metrics(df, schema):
     if schema.get("profit_col") and schema["profit_col"] != "None":
         df['_prof'] = to_f(schema["profit_col"])
     else:
-        df['_prof'] = df['_rev'] * 0.25 # Default 25% margin estimate
+        df['_prof'] = df['_rev'] * 0.25 
 
     p_col = schema.get("product_col", df.columns[0])
     
     metrics = {
         "rev": round(df['_rev'].sum(), 2),
         "prof": round(df['_prof'].sum(), 2),
-        "vat": round(df['_rev'].sum() * 0.15, 2), # ZATCA 15%
+        "vat": round(df['_rev'].sum() * 0.15, 2),
         "best_seller": str(df.groupby(p_col)['_rev'].sum().idxmax()) if df['_rev'].sum() > 0 else "N/A",
         "top_profit_prod": str(df.groupby(p_col)['_prof'].sum().idxmax()) if df['_prof'].sum() > 0 else "N/A",
         "p_col": p_col
@@ -78,17 +108,15 @@ def calculate_precise_metrics(df, schema):
     return metrics, df
 
 def groq_get_insights(client, metrics):
-    """Uses Groq (Llama 3) for the final business narrative."""
     try:
         completion = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[
-                {"role": "system", "content": "You are a senior SME Business Consultant in Saudi Arabia. Provide strategic, professional advice based on provided data."},
-                {"role": "user", "content": f"Total Revenue: {metrics['rev']} SAR. Net Profit: {metrics['prof']} SAR. Top Product: {metrics['best_seller']}. Most Profitable Item: {metrics['top_profit_prod']}. Give 3 specific growth insights."}
+                {"role": "system", "content": "You are a senior SME Business Consultant in Saudi Arabia."},
+                {"role": "user", "content": f"Revenue: {metrics['rev']} SAR. Profit: {metrics['prof']} SAR. Top Product: {metrics['best_seller']}. Most Profitable: {metrics['top_profit_prod']}. 3 Tips."}
             ],
             temperature=0.5,
         )
         return completion.choices[0].message.content
     except Exception as e:
-        return f"Consultant is currently unavailable: {str(e)}"
-
+        return f"Consultant unavailable: {str(e)}"
