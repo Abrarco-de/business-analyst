@@ -1,8 +1,8 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-from business_ai_mvp import *
-
+# Top of app.py
+from business_ai_mvp import configure_engines, calculate_precise_metrics, get_intelligent_answer
 # 1. Config
 st.set_page_config(page_title="Visionary SME AI", layout="wide")
 
@@ -60,3 +60,4 @@ if uploaded_file:
                     response = get_intelligent_answer(groq_client, df_final, prompt, m)
                     st.markdown(response)
                     st.session_state.messages.append({"role": "assistant", "content": response})
+
