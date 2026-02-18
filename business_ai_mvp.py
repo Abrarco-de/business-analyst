@@ -16,26 +16,23 @@ def process_business_file(uploaded_file):
             df = pd.read_csv(uploaded_file, encoding='latin1')
         else:
             df = pd.read_excel(uploaded_file)
-        # Standardize headers: Remove BOM, strip spaces, replace mid-spaces with underscores
         df.columns = [str(c).replace('ï»¿', '').strip() for c in df.columns]
         return df
     except: return None
 
 def get_header_mapping(columns):
-    """Refined mapping specifically for your 3 files."""
     schema_hints = {
         "product_name": ["product", "category", "sub_category", "item", "المنتج"],
-        "total_amount": ["total_amount", "sales", "revenue", "net_amount", "المجموع"],
+        "total_amount": ["total_amount", "sales", "revenue", "net_amount"],
         "unit_price": ["price_per_unit", "unit_price", "price", "rate"],
-        "quantity": ["quantity", "qty", "count", "الكمية"],
-        "profit": ["profit", "margin", "gain"]
+        "quantity": ["quantity", "qty", "count"],
+        "profit": ["profit", "margin", "gain", "الربح"]
     }
     mapping = {}
     for col in columns:
         c_low = col.lower().replace(" ", "_")
         for std, hints in schema_hints.items():
             if any(h == c_low or h in c_low for h in hints):
-                # Avoid mapping multiple columns to the same key
                 if std not in mapping.values():
                     mapping[col] = std
                     break
@@ -47,54 +44,58 @@ def generate_insights(df, mapping_overrides=None):
         
         def to_float(col_name):
             if not col_name or col_name not in df.columns: return pd.Series([0.0]*len(df))
-            s = df[col_name].astype(str)
-            # Remove currency and commas properly
-            s = s.str.replace(r'[^\d.]', '', regex=True)
+            s = df[col_name].astype(str).str.replace(r'[^\d.]', '', regex=True)
             return pd.to_numeric(s, errors='coerce').fillna(0.0)
 
-        # 1. Identify Columns
         p_col = m.get("product_name", df.columns[0])
         r_col = m.get("total_amount")
         u_col = m.get("unit_price")
         q_col = m.get("quantity")
         f_col = m.get("profit")
 
-        # 2. Revenue Calculation Logic
+        # Revenue Logic
         if r_col:
-            revenue_data = to_float(r_col)
+            rev_series = to_float(r_col)
         elif u_col and q_col:
-            revenue_data = to_float(u_col) * to_float(q_col)
+            rev_series = to_float(u_col) * to_float(q_col)
         else:
-            # Fallback: find first numeric column that isn't ID or Date
-            numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-            r_col = [c for c in numeric_cols if "id" not in c.lower() and "date" not in c.lower()]
-            revenue_data = df[r_col[0]] if r_col else pd.Series([0.0]*len(df))
+            rev_series = pd.Series([0.0]*len(df))
 
-        df['calculated_revenue'] = revenue_data
-        total_rev = float(revenue_data.sum())
+        df['calculated_revenue'] = rev_series
+        total_rev = float(rev_series.sum())
         
-        # 3. Profit Calculation Logic
-        if f_col and f_col in df.columns:
-            total_profit = float(to_float(f_col).sum())
-        else:
-            total_profit = total_rev * 0.25 # Default 25% if not found
+        # ZATCA VAT (15%)
+        zatca_vat = total_rev * 0.15
 
-        # 4. Best Seller (Must be text)
+        # Profit Logic
+        if f_col and f_col in df.columns:
+            profit_series = to_float(f_col)
+        else:
+            profit_series = rev_series * 0.25 # Estimate
+        
+        df['calculated_profit'] = profit_series
+        total_profit = float(profit_series.sum())
+
+        # Best Seller (By Revenue) & Highest Profit Product
         best_seller = "N/A"
+        most_profitable_prod = "N/A"
+        
         if total_rev > 0:
             best_seller = str(df.groupby(p_col)['calculated_revenue'].sum().idxmax())
+            most_profitable_prod = str(df.groupby(p_col)['calculated_profit'].sum().idxmax())
 
         return {
             "revenue": round(total_rev, 2),
+            "zatca_vat": round(zatca_vat, 2),
             "profit": round(total_profit, 2),
             "margin": round((total_profit/total_rev*100), 2) if total_rev > 0 else 0,
             "best_seller": best_seller,
+            "most_profitable_prod": most_profitable_prod,
             "df": df,
-            "p_col": p_col,
-            "r_col": r_col or "Calculated"
+            "p_col": p_col
         }
     except Exception as e:
-        return {"revenue": 0, "profit": 0, "margin": 0, "best_seller": "Error", "df": df, "err": str(e)}
+        return {"revenue": 0, "zatca_vat":0, "profit": 0, "margin": 0, "best_seller": "Error", "df": df}
 
 
 
