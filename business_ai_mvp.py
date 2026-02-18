@@ -9,74 +9,58 @@ def configure_dual_engines(groq_key, mistral_key):
     except: return None, None
 
 def process_business_data(groq_client, df):
-    # 1. CLEAN HEADERS
     df.columns = [str(c).strip() for c in df.columns]
     
-    # 2. STRICT COLUMN MAPPING
-    # For Supermart file: 'Sales' is Rev, 'Profit' is Prof, 'Sub Category' is Product
-    def find_col(possible_names):
-        for name in possible_names:
-            for col in df.columns:
-                if name.lower() == col.lower(): return col
-        # Fallback to keyword match
-        for name in possible_names:
-            for col in df.columns:
-                if name.lower() in col.lower(): return col
-        return df.columns[0]
+    # 1. Smart Mapping for Supermart File
+    r_col = next((c for c in df.columns if 'Sales' in c or 'Revenue' in c), df.columns[0])
+    p_col = next((c for c in df.columns if 'Profit' in c), None)
+    prod_col = next((c for c in df.columns if 'Sub Category' in c or 'Item' in c), df.columns[0])
 
-    r_col = find_col(['Sales', 'Revenue', 'Amount'])
-    p_col = find_col(['Profit', 'Net Margin', 'Gain'])
-    # We prioritize 'Sub Category' then 'Category' for product names
-    prod_col = find_col(['Sub Category', 'Product', 'Item', 'Category'])
-
-    # 3. FORCE NUMERIC (Cleaning currency symbols etc)
-    def to_num(series):
-        return pd.to_numeric(series.astype(str).str.replace(r'[^\d.-]', '', regex=True), errors='coerce').fillna(0)
-
-    df['_rev'] = to_num(df[r_col])
-    df['_prof'] = to_num(df[p_col])
+    # 2. Cleaning
+    df['_rev'] = pd.to_numeric(df[r_col].astype(str).str.replace(r'[^\d.-]', '', regex=True), errors='coerce').fillna(0)
+    df['_prof'] = pd.to_numeric(df[p_col].astype(str).str.replace(r'[^\d.-]', '', regex=True), errors='coerce').fillna(0)
     
-    # Safety: If Discount was picked as Sales, Revenue will be tiny. 
-    # We check if another column has a much larger sum.
-    for col in df.columns:
-        if col != r_col and df[col].dtype in ['float64', 'int64']:
-            if df[col].sum() > df['_rev'].sum() * 10: # If another col is 10x bigger, it's likely the real Revenue
-                df['_rev'] = df[col]
-
-    # 4. ADVANCED METRICS
-    total_rev = df['_rev'].sum()
-    total_prof = df['_prof'].sum()
-    
+    # 3. Product Analysis (The "Data Exchange" Fix)
     prod_stats = df.groupby(prod_col).agg({'_rev': 'sum', '_prof': 'sum'})
     prod_stats['margin'] = (prod_stats['_prof'] / prod_stats['_rev'] * 100).fillna(0)
 
+    # We find the absolute extremes instead of using a 10% filter
+    least_margin_item = prod_stats['margin'].idxmin()
+    least_margin_val = prod_stats['margin'].min()
+    
+    best_margin_item = prod_stats['margin'].idxmax()
+    best_margin_val = prod_stats['margin'].max()
+
     metrics = {
-        "total_revenue": round(total_rev, 2),
-        "total_profit": round(total_prof, 2),
-        "gross_margin_pct": round((total_prof / total_rev * 100), 2) if total_rev > 0 else 0,
-        "vat_due": round(total_rev * 0.15, 2),
-        "avg_transaction": round(total_rev / len(df), 2) if len(df) > 0 else 0,
-        "total_units": len(df), # In this dataset, 1 row = 1 unit usually
-        "rev_per_unit": round(total_rev / len(df), 2) if len(df) > 0 else 0,
+        "total_revenue": round(df['_rev'].sum(), 2),
+        "total_profit": round(df['_prof'].sum(), 2),
+        "gross_margin_pct": round((df['_prof'].sum() / df['_rev'].sum() * 100), 2),
+        "vat_due": round(df['_rev'].sum() * 0.15, 2),
+        "avg_transaction": round(df['_rev'].mean(), 2),
+        "total_units": len(df),
+        "rev_per_unit": round(df['_rev'].mean(), 2),
         "top_rev_prods": prod_stats['_rev'].nlargest(3).index.tolist(),
         "top_prof_prods": prod_stats['_prof'].nlargest(3).index.tolist(),
+        # NEW: Absolute Extreme Data Exchange
+        "least_margin_name": f"{least_margin_item} ({least_margin_val:.1f}%)",
+        "best_margin_name": f"{best_margin_item} ({best_margin_val:.1f}%)",
         "loss_making": prod_stats[prod_stats['_prof'] < 0].index.tolist(),
-        "low_margin": prod_stats[(prod_stats['margin'] < 10)].index.tolist(),
-        "high_vol_low_margin": [] # Placeholder for this logic
+        "low_margin": prod_stats.nsmallest(3, 'margin').index.tolist() # Gives bottom 3 always
     }
     return metrics, df
 
 def get_ai_response(mistral_client, metrics, user_query):
-    # Pass the real data to the AI
-    prompt = f"""
-    BUSINESS DATA:
-    - Total Revenue: {metrics['total_revenue']} SAR
+    # This context now GUARANTEES the AI knows the answer
+    context = f"""
+    SME DATA:
+    - Absolute Lowest Margin: {metrics['least_margin_name']}
+    - Absolute Highest Margin: {metrics['best_margin_name']}
+    - Top Revenue Items: {metrics['top_rev_prods']}
     - Total Profit: {metrics['total_profit']} SAR
-    - Top Items: {metrics['top_prof_prods']}
-    
-    QUESTION: {user_query}
-    INSTRUCTION: Answer as a Saudi Business Consultant in 2 sentences max.
     """
+    
+    prompt = f"{context}\n\nQuestion: {user_query}\n\nTask: Answer briefly using the exact names above."
+    
     try:
         res = mistral_client.chat.complete(model="mistral-large-latest", messages=[{"role": "user", "content": prompt}])
         return res.choices[0].message.content
