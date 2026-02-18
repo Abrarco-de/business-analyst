@@ -1,78 +1,53 @@
 import pandas as pd
-import json
-import re
+import streamlit as st
 from groq import Groq
-from mistralai.client import MistralClient
-from mistralai.models.chat_completion import ChatMessage
+# NEW IMPORT FOR 2026
+try:
+    from mistralai import Mistral
+except ImportError:
+    st.error("Missing Library: Run 'pip install mistralai' and restart the app.")
 
-# --- 1. ENGINE CONFIGURATION ---
+# 1. ENGINE CONFIG
 def configure_dual_engines(groq_key, mistral_key):
     try:
-        g_client = Groq(api_key=groq_key)
-        m_client = MistralClient(api_key=mistral_key)
-        return g_client, m_client
-    except: return None, None
+        g = Groq(api_key=groq_key)
+        # 2026 SDK uses Mistral(api_key=...)
+        m = Mistral(api_key=mistral_key)
+        return g, m
+    except Exception as e:
+        st.error(f"Config Error: {e}")
+        return None, None
 
-# --- 2. THE CLEANER (Groq Llama 3.3) ---
+# 2. DATA CLEANER (Groq)
 def process_business_data(groq_client, df):
-    # Standardize Column Names
-    df.columns = [str(c).strip().replace('ï»¿', '') for c in df.columns]
-    cols_list = df.columns.tolist()
-
-    # Agent 1: Use Groq to map columns via JSON
-    mapping_prompt = f"""
-    Identify the column names for: Revenue, Profit, and Product Name from this list: {cols_list}.
-    Return ONLY a JSON object: {{"rev": "name", "prof": "name", "prod": "name"}}
-    """
+    df.columns = [str(c).strip() for c in df.columns]
     
-    mapping_res = groq_client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
-        messages=[{"role": "user", "content": mapping_prompt}],
-        response_format={"type": "json_object"}
-    )
+    # Simple, fast logic to find SAR values
+    r_col = next((c for c in df.columns if any(x in c.lower() for x in ['rev', 'sale', 'amount'])), df.columns[0])
+    p_col = next((c for c in df.columns if 'prof' in c.lower()), None)
     
-    mapping = json.loads(mapping_res.choices[0].message.content)
+    df['_rev'] = pd.to_numeric(df[r_col].astype(str).str.replace(r'[^\d.-]', '', regex=True), errors='coerce').fillna(0)
+    df['_prof'] = pd.to_numeric(df[p_col].astype(str).str.replace(r'[^\d.-]', '', regex=True), errors='coerce').fillna(0) if p_col else df['_rev'] * 0.20
     
-    # Cleaning Logic
-    def to_num(col): return pd.to_numeric(df[col].astype(str).str.replace(r'[^\d.-]', '', regex=True), errors='coerce').fillna(0)
-    
-    df['_rev'] = to_num(mapping['rev'])
-    df['_prof'] = to_num(mapping['prof']) if mapping['prof'] in df.columns else df['_rev'] * 0.20
-    
-    # ADVANCED SME METRICS
-    total_rev = df['_rev'].sum()
-    total_prof = df['_prof'].sum()
-    
-    metrics = {
-        "rev": round(total_rev, 2),
-        "prof": round(total_prof, 2),
-        "margin": round((total_prof / total_rev * 100), 2) if total_rev > 0 else 0,
-        "vat": round(total_rev * 0.15, 2), # Saudi VAT
-        "top_item": str(df.groupby(mapping['prod'])['_rev'].sum().idxmax()) if total_rev > 0 else "N/A",
-        "avg_order": round(df['_rev'].mean(), 2)
+    m = {
+        "rev": round(df['_rev'].sum(), 2),
+        "prof": round(df['_prof'].sum(), 2),
+        "margin": round((df['_prof'].sum() / df['_rev'].sum() * 100), 2) if df['_rev'].sum() > 0 else 0,
+        "vat": round(df['_rev'].sum() * 0.15, 2)
     }
-    
-    return metrics, df
+    return m, df
 
-# --- 3. THE STRATEGIST (Mistral Large) ---
+# 3. STRATEGIST (Mistral)
 def get_ai_response(mistral_client, metrics, df, user_query):
     try:
-        # Data sample for context
-        data_context = df.head(30).to_string()
-        
-        prompt = f"""
-        You are a Senior Saudi Business Consultant.
-        METRICS: Rev: {metrics['rev']} SAR, Margin: {metrics['margin']}%, Top Item: {metrics['top_item']}.
-        DATA SAMPLE: {data_context}
-        
-        USER QUESTION: "{user_query}"
-        
-        TASK: Provide a sharp, data-backed business insight. Mention SAR values.
-        Give 1 actionable tip specifically for the Saudi market context.
-        """
-        
-        messages = [ChatMessage(role="user", content=prompt)]
-        response = mistral_client.chat(model="mistral-large-latest", messages=messages)
+        # Use the 2026 'chat.complete' method
+        response = mistral_client.chat.complete(
+            model="mistral-large-latest",
+            messages=[{
+                "role": "user", 
+                "content": f"SME Data: {metrics}. Question: {user_query}. Provide a Saudi business strategy tip."
+            }]
+        )
         return response.choices[0].message.content
     except Exception as e:
-        return f"Consultant Error: {str(e)}"
+        return f"AI Insight Error: {str(e)}"
