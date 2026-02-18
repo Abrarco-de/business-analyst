@@ -19,24 +19,20 @@ if uploaded_file:
 
         st.subheader("📄 Data Preview")
         st.dataframe(df.head(20), use_container_width=True)
+metrics = calculate_metrics(df_final)
 
-        metrics = mvp.generate_insights(df)
+st.subheader("📊 Business Metrics")
+st.metric("Revenue", f"{metrics['total_revenue']} SAR")
+st.metric("Profit", f"{metrics['total_profit']} SAR")
+st.metric("Margin", f"{metrics['gross_margin_pct']} %")
+st.metric("VAT Due", f"{metrics['vat_due']} SAR")
 
-        st.subheader("📊 Key Metrics")
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Revenue (SAR)", metrics["total_revenue"])
-        c2.metric("Profit (SAR)", metrics["total_profit"])
-        c3.metric("Margin (%)", metrics["margin"])
-        c4.metric("VAT 15% (SAR)", metrics["vat"])
-
-        st.subheader("🔥 Top Profitable Products")
-        st.table(metrics["top_products"])
-
-        st.subheader("⚠️ Loss-Making Products")
-        st.table(metrics["loss_products"])
+st.subheader("🤖 AI Insights")
+st.write(generate_ai_insights(metrics))
 
     except Exception as e:
         st.error(str(e))
+
 
 
 
