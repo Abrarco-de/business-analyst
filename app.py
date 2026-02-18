@@ -1,37 +1,49 @@
 import streamlit as st
+import os
 import business_ai_mvp as mvp
 
-st.set_page_config(
-    page_title="Saudi SME Intelligence",
-    layout="wide"
-)
+st.set_page_config(page_title="Business Analyst MVP", layout="wide")
 
-st.title("🇸🇦 SME Business Intelligence Dashboard")
+# ---------- CONFIG ----------
+API_KEY = os.getenv("GEMINI_API_KEY")
+mvp.configure_ai(API_KEY)
+
+st.title("📊 AI Business Analyst")
 
 uploaded_file = st.file_uploader(
-    "Upload POS / Sales File (CSV or Excel)",
+    "Upload your POS / Sales file",
     type=["csv", "xlsx"]
 )
 
-if uploaded_file:
+# ---------- MAIN FLOW ----------
+if uploaded_file is not None:
     try:
-        df = mvp.process_business_file(uploaded_file)
+        # Step 1: Clean & normalize
+        df_final = mvp.process_business_file(uploaded_file)
 
-        st.subheader("📄 Data Preview")
-        st.dataframe(df.head(20), use_container_width=True)
-metrics = calculate_metrics(df_final)
+        st.subheader("📄 Cleaned Data Preview")
+        st.dataframe(df_final.head(20))
 
-st.subheader("📊 Business Metrics")
-st.metric("Revenue", f"{metrics['total_revenue']} SAR")
-st.metric("Profit", f"{metrics['total_profit']} SAR")
-st.metric("Margin", f"{metrics['gross_margin_pct']} %")
-st.metric("VAT Due", f"{metrics['vat_due']} SAR")
+        # Step 2: Metrics
+        metrics = mvp.calculate_metrics(df_final)
 
-st.subheader("🤖 AI Insights")
-st.write(generate_ai_insights(metrics))
+        st.subheader("📈 Business Metrics")
+        c1, c2, c3, c4 = st.columns(4)
+
+        c1.metric("Revenue", f"{metrics['total_revenue']} SAR")
+        c2.metric("Profit", f"{metrics['total_profit']} SAR")
+        c3.metric("Margin %", f"{metrics['gross_margin_pct']}%")
+        c4.metric("VAT Due", f"{metrics['vat_due']} SAR")
+
+        # Step 3: AI Insights
+        st.subheader("🤖 AI Business Insights")
+        insight_text = mvp.generate_ai_insights(metrics)
+        st.write(insight_text)
 
     except Exception as e:
-        st.error(str(e))
+        st.error("❌ Error processing file")
+        st.code(str(e))
+
 
 
 
