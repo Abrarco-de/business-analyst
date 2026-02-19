@@ -140,4 +140,3 @@ else:
     if st.sidebar.button("System Reset"):
         st.session_state.m = None
         st.rerun()
-        
