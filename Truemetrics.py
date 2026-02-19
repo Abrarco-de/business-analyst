@@ -46,7 +46,7 @@ def process_business_data(df_raw):
         df['_rev'] = clean_num(df[found['Revenue']])
         df['_prof'] = clean_num(df[found['Profit']]) if found['Profit'] else df['_rev'] * 0.20
         
-        # City/Category distribution for UI
+        # Distributions
         city_data = df.groupby(found['City'])['_rev'].sum().nlargest(5).to_dict() if found['City'] else {}
         cat_data = df.groupby(found['Category'])['_rev'].sum().nlargest(5).to_dict() if found['Category'] else {}
         
@@ -55,20 +55,25 @@ def process_business_data(df_raw):
         p_stats = df.groupby(prod_key).agg({'_rev':'sum', '_prof':'sum'})
         p_stats['m'] = (p_stats['_prof']/p_stats['_rev']*100).fillna(0)
 
-        # Trend
+        # Trend Logic
         trend_dict = {}
         if found['Date']:
             df['_date'] = pd.to_datetime(df[found['Date']], dayfirst=True, errors='coerce')
             if not df['_date'].isna().all():
-                monthly = df.dropna(subset=['_date']).set_index('_date')['_rev'].resample('ME').sum()
+                temp_df = df.dropna(subset=['_date']).set_index('_date')
+                try:
+                    monthly = temp_df['_rev'].resample('ME').sum()
+                except:
+                    monthly = temp_df['_rev'].resample('M').sum()
                 trend_dict = {k.strftime('%b %Y'): float(v) for k, v in monthly.items()}
 
+        # RETURN KEYS - Must match app.py
         return {
             "mapping_preview": mapping_details,
             "total_revenue": float(df['_rev'].sum()),
             "total_profit": float(df['_prof'].sum()),
-            "margin_pct": round((df['_prof'].sum()/df['_rev'].sum()*100),1) if df['_rev'].sum()>0 else 0,
-            "vat_due": float(df['_rev'].sum()*0.15),
+            "margin_pct": round((df['_prof'].sum()/df['_rev'].sum()*100), 1) if df['_rev'].sum() > 0 else 0,
+            "vat_due": float(df['_rev'].sum() * 0.15),
             "units": len(df),
             "city_dist": city_data,
             "cat_dist": cat_data,
@@ -79,9 +84,9 @@ def process_business_data(df_raw):
     except Exception as e: return {"error": str(e)}, df_raw
 
 def get_ai_response(mistral_client, m, query):
-    if not mistral_client: return "AI Offline"
-    ctx = f"Data: Rev {m['total_revenue']} SAR, Profit {m['total_profit']} SAR. City Dist: {m['city_dist']}"
+    if not mistral_client: return "AI Engine Offline"
+    ctx = f"Rev: {m['total_revenue']} SAR, Profit: {m['total_profit']} SAR."
     try:
         res = mistral_client.chat.complete(model="mistral-large-latest", messages=[{"role":"user", "content": f"{ctx}\nQuestion: {query}"}])
         return res.choices[0].message.content
-    except: return "Analysis ready."
+    except: return "Ready."
