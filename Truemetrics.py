@@ -1,124 +1,85 @@
-import streamlit as st
 import pandas as pd
-import plotly.express as px
-import os
-from Truemetrics import configure_dual_engines, process_business_data, get_ai_response
+import numpy as np
+from groq import Groq
+from mistralai import Mistral
 
-# 1. SETUP
-st.set_page_config(page_title="TrueMetrics | Intelligence", page_icon="🎯", layout="wide")
-BLUE, LIME, DARK = "#3B82F6", "#A3E635", "#020617"
+# This function must be defined clearly at the top
+def configure_dual_engines(groq_key, mistral_key):
+    g, m = None, None
+    try:
+        if groq_key: g = Groq(api_key=groq_key)
+        if mistral_key: m = Mistral(api_key=mistral_key)
+    except: pass
+    return g, m
 
-# 2. THEME (Aura Design)
-st.markdown(f"""
-    <style>
-    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;800&display=swap');
-    .stApp {{
-        background: radial-gradient(circle at 0% 0%, rgba(59,130,246,0.12) 0%, transparent 25%),
-                    radial-gradient(circle at 100% 100%, rgba(163,230,53,0.08) 0%, transparent 25%), {DARK};
-        font-family: 'Plus Jakarta Sans', sans-serif; color: #f8fafc;
-    }}
-    div[data-testid="stMetric"] {{
-        background: rgba(255, 255, 255, 0.03) !important;
-        backdrop-filter: blur(20px); border: 1px solid rgba(255, 255, 255, 0.1) !important;
-        border-radius: 20px !important; padding: 20px !important;
-    }}
-    .glass-card {{
-        background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.08);
-        border-radius: 24px; padding: 25px; margin-bottom: 20px;
-    }}
-    .hero-title {{ font-size: 64px; font-weight: 800; letter-spacing: -3px; color: #fff; margin-bottom: 0px; }}
-    .tagline {{ color: {BLUE}; font-weight: 700; letter-spacing: 5px; font-size: 12px; text-transform: uppercase; margin-bottom: 40px; }}
-    .dist-bar-bg {{ background: rgba(255,255,255,0.05); border-radius: 10px; height: 8px; width: 100%; margin-top: 4px; }}
-    .dist-bar-fill {{ background: {BLUE}; height: 8px; border-radius: 10px; }}
-    </style>
-    """, unsafe_allow_html=True)
+def clean_num(series):
+    if series is None: return 0
+    clean = series.astype(str).str.replace(r'[^\d.-]', '', regex=True)
+    return pd.to_numeric(clean, errors='coerce').fillna(0)
 
-# 3. INITIALIZATION
-g_client, m_client = configure_dual_engines(st.secrets.get("GROQ_API_KEY"), st.secrets.get("MISTRAL_API_KEY"))
-if "m" not in st.session_state: st.session_state.m = None
-if "chat" not in st.session_state: st.session_state.chat = []
+def detect_col(df, keywords):
+    cols = [str(c).strip() for c in df.columns]
+    for k in keywords:
+        for c in cols:
+            if k.lower() in c.lower(): return c
+    return None
 
-# --- FLOW ---
-if st.session_state.m is None:
-    st.markdown("<div style='height:10vh'></div>", unsafe_allow_html=True)
-    st.markdown("<h1 class='hero-title'>TrueMetrics</h1>", unsafe_allow_html=True)
-    st.markdown("<p class='tagline'>Precision in every data point</p>", unsafe_allow_html=True)
-    up = st.file_uploader("Upload Business Data", type=["csv", "xlsx"])
-    if up:
-        raw = pd.read_csv(up) if up.name.endswith('csv') else pd.read_excel(up)
-        m, _ = process_business_data(raw)
-        if "error" in m: st.error(m["error"])
-        else:
-            st.session_state.m = m
-            st.rerun()
-else:
-    m = st.session_state.m
+def process_business_data(df_raw):
+    try:
+        if df_raw is None or df_raw.empty: return {"error": "Empty File"}, None
+        df = df_raw.copy()
+        mapping_details = []
+        detect_map = {
+            'Revenue': ['sales', 'revenue', 'amount', 'total', 'price', 'income', 'المبيعات'],
+            'Profit': ['profit', 'margin', 'earnings', 'net', 'gain', 'الربح'],
+            'Date': ['date', 'time', 'year', 'month', 'التاريخ'],
+            'City': ['city', 'region', 'location', 'branch', 'المدينة'],
+            'Category': ['category', 'dept', 'group', 'type', 'الفئة'],
+            'Product': ['sub category', 'product', 'item', 'description', 'المنتج']
+        }
+        
+        found = {k: detect_col(df, v) for k, v in detect_map.items()}
+        for k, v in found.items():
+            if v: mapping_details.append({"Logic": k, "Header": v, "Sample": str(df[v].iloc[0])})
 
-    # Verification Table
-    with st.expander("🔍 DATA MAPPING PREVIEW", expanded=False):
-        st.table(pd.DataFrame(m["mapping_preview"]))
+        if not found['Revenue']: return {"error": "Missing Sales Column"}, df_raw
 
-    # 1. KPI MATRIX
-    k1, k2, k3, k4, k5 = st.columns(5)
-    k1.metric("REVENUE", f"{m['total_revenue']:,.0f} SAR")
-    k2.metric("PROFIT", f"{m['total_profit']:,.0f} SAR")
-    k3.metric("MARGIN", f"{m['margin_pct']}%")
-    k4.metric("VAT (15%)", f"{m['vat_due']:,.0f} SAR")
-    k5.metric("RECORDS", f"{m['units']:,}")
+        df['_rev'] = clean_num(df[found['Revenue']])
+        df['_prof'] = clean_num(df[found['Profit']]) if found['Profit'] else df['_rev'] * 0.20
+        
+        city_dist = df.groupby(found['City'])['_rev'].sum().nlargest(5).to_dict() if found['City'] else {}
+        
+        prod_key = found.get('Product', df.columns[0])
+        p_stats = df.groupby(prod_key).agg({'_rev':'sum', '_prof':'sum'})
+        p_stats['m'] = (p_stats['_prof']/p_stats['_rev']*100).replace([np.inf, -np.inf], 0).fillna(0)
 
-    # 2. GRAPHS & INSIGHTS GRID
-    st.markdown("<br>", unsafe_allow_html=True)
-    col_left, col_right = st.columns([2, 1])
+        trend_dict = {}
+        if found['Date']:
+            df['_dt'] = pd.to_datetime(df[found['Date']], dayfirst=True, errors='coerce')
+            temp_df = df.dropna(subset=['_dt']).copy()
+            if not temp_df.empty:
+                temp_df['Month_Year'] = temp_df['_dt'].dt.strftime('%Y-%m')
+                monthly_sum = temp_df.groupby('Month_Year')['_rev'].sum().sort_index()
+                trend_dict = {pd.to_datetime(k).strftime('%b %Y'): float(v) for k, v in monthly_sum.items()}
 
-    with col_left:
-        # Trend Graph
-        st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
-        st.markdown("#### 📈 Strategic Growth Trend")
-        if m['trend_data']:
-            tdf = pd.DataFrame(m['trend_data'].items(), columns=['Date', 'Sales'])
-            fig = px.area(tdf, x='Date', y='Sales')
-            fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font_color='white', height=350, margin=dict(l=0,r=0,t=10,b=0))
-            fig.update_traces(line_color=BLUE, fillcolor='rgba(59, 130, 246, 0.1)', line_width=4)
-            st.plotly_chart(fig, use_container_width=True)
-        st.markdown("</div>", unsafe_allow_html=True)
+        return {
+            "mapping_preview": mapping_details,
+            "total_revenue": float(df['_rev'].sum()),
+            "total_profit": float(df['_prof'].sum()),
+            "margin_pct": round((df['_prof'].sum()/df['_rev'].sum()*100), 1) if df['_rev'].sum() > 0 else 0,
+            "vat_due": float(df['_rev'].sum() * 0.15),
+            "units": len(df),
+            "city_dist": city_dist,
+            "bot_margins": [f"{n} ({m:.1f}%)" for n, m in p_stats.sort_values('m').head(3)['m'].items()],
+            "top_margins": [f"{n} ({m:.1f}%)" for n, m in p_stats.sort_values('m', ascending=False).head(3)['m'].items()],
+            "trend_data": trend_dict
+        }, df
+    except Exception as e: return {"error": f"Logic Error: {str(e)}"}, df_raw
 
-        # Bottom Alerts
-        a1, a2 = st.columns(2)
-        with a1:
-            st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
-            st.markdown("<p style='color:#ef4444; font-weight:800; font-size:12px;'>LOW MARGIN RISKS</p>", unsafe_allow_html=True)
-            for i in m['bot_margins']: st.caption(f"⚠️ {i}")
-            st.markdown("</div>", unsafe_allow_html=True)
-        with a2:
-            st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
-            st.markdown("<p style='color:#A3E635; font-weight:800; font-size:12px;'>PEAK PERFORMANCE</p>", unsafe_allow_html=True)
-            for i in m['top_margins']: st.caption(f"💎 {i}")
-            st.markdown("</div>", unsafe_allow_html=True)
-
-    with col_right:
-        # Market Distribution Bars
-        st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
-        st.markdown("#### 📍 Market Share (City)")
-        for city, val in m['city_dist'].items():
-            pct = (val / m['total_revenue']) * 100
-            st.markdown(f"<p style='margin:0; font-size:13px;'>{city} <span style='float:right; color:{BLUE}'>{pct:.1f}%</span></p>", unsafe_allow_html=True)
-            st.markdown(f"<div class='dist-bar-bg'><div class='dist-bar-fill' style='width:{pct}%'></div></div>", unsafe_allow_html=True)
-            st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
-        st.markdown("</div>", unsafe_allow_html=True)
-
-        # AI Consultant
-        st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
-        st.markdown(f"#### 💬 AI Agent")
-        chat_box = st.container(height=240)
-        with chat_box:
-            for msg in st.session_state.chat:
-                with st.chat_message(msg["role"]): st.write(msg["content"])
-        if p := st.chat_input("Analyze..."):
-            st.session_state.chat.append({"role": "user", "content": p})
-            st.session_state.chat.append({"role": "assistant", "content": get_ai_response(m_client, m, p)})
-            st.rerun()
-        st.markdown("</div>", unsafe_allow_html=True)
-
-    if st.sidebar.button("System Reset"):
-        st.session_state.m = None
-        st.rerun()
+def get_ai_response(mistral_client, m, query):
+    if not mistral_client: return "AI Offline"
+    ctx = f"Data: Rev {m['total_revenue']} SAR, Profit {m['total_profit']} SAR."
+    try:
+        res = mistral_client.chat.complete(model="mistral-large-latest", messages=[{"role":"user", "content": f"{ctx}\nQuestion: {query}"}])
+        return res.choices[0].message.content
+    except: return "Ready."
