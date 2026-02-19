@@ -54,19 +54,23 @@ def process_business_data(df_raw):
         p_stats = df.groupby(prod_key).agg({'_rev':'sum', '_prof':'sum'})
         p_stats['m'] = (p_stats['_prof']/p_stats['_rev']*100).fillna(0)
 
-        # Trend Logic (FIXED FOR 'BY' AND 'LEVEL' ERROR)
+        # --- FIX: ROBUST TREND LOGIC ---
         trend_dict = {}
         if found['Date']:
-            df['_date'] = pd.to_datetime(df[found['Date']], dayfirst=True, errors='coerce')
-            if not df['_date'].isna().all():
-                # Clean up rows with invalid dates
-                temp_df = df.dropna(subset=['_date']).copy()
+            # 1. Convert to datetime
+            df['_dt'] = pd.to_datetime(df[found['Date']], dayfirst=True, errors='coerce')
+            
+            # 2. Drop invalid dates and set as index
+            temp_df = df.dropna(subset=['_dt']).copy()
+            if not temp_df.empty:
+                temp_df = temp_df.set_index('_dt')
+                # 3. Resample using a standard rule (handles the 'by/level' error)
                 try:
-                    # Using 'on' or 'rule' depending on library version
-                    monthly = temp_df.resample('ME', on='_date')['_rev'].sum()
+                    # 'ME' is Month End in newest pandas
+                    monthly = temp_df['_rev'].resample('ME').sum()
                 except:
-                    # Fallback for older pandas versions
-                    monthly = temp_df.resample('M', on='_date')['_rev'].sum()
+                    # 'M' for older pandas
+                    monthly = temp_df['_rev'].resample('M').sum()
                 
                 trend_dict = {k.strftime('%b %Y'): float(v) for k, v in monthly.items()}
 
@@ -91,4 +95,3 @@ def get_ai_response(mistral_client, m, query):
         res = mistral_client.chat.complete(model="mistral-large-latest", messages=[{"role":"user", "content": f"{ctx}\nQuestion: {query}"}])
         return res.choices[0].message.content
     except: return "Ready."
-
