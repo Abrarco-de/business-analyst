@@ -3,7 +3,6 @@ import numpy as np
 from groq import Groq
 from mistralai import Mistral
 
-# This function must be defined clearly at the top
 def configure_dual_engines(groq_key, mistral_key):
     g, m = None, None
     try:
@@ -33,7 +32,7 @@ def process_business_data(df_raw):
             'Revenue': ['sales', 'revenue', 'amount', 'total', 'price', 'income', 'المبيعات'],
             'Profit': ['profit', 'margin', 'earnings', 'net', 'gain', 'الربح'],
             'Date': ['date', 'time', 'year', 'month', 'التاريخ'],
-            'City': ['city', 'region', 'location', 'branch', 'المدينة'],
+            'City': ['city', 'region', 'location', 'branch', 'store', 'المدينة'],
             'Category': ['category', 'dept', 'group', 'type', 'الفئة'],
             'Product': ['sub category', 'product', 'item', 'description', 'المنتج']
         }
@@ -44,15 +43,20 @@ def process_business_data(df_raw):
 
         if not found['Revenue']: return {"error": "Missing Sales Column"}, df_raw
 
+        # Core Metrics
         df['_rev'] = clean_num(df[found['Revenue']])
         df['_prof'] = clean_num(df[found['Profit']]) if found['Profit'] else df['_rev'] * 0.20
         
-        city_dist = df.groupby(found['City'])['_rev'].sum().nlargest(5).to_dict() if found['City'] else {}
+        # City/Market Share
+        city_key = found['City'] if found['City'] else None
+        city_dist = df.groupby(by=city_key)['_rev'].sum().nlargest(5).to_dict() if city_key else {}
         
-        prod_key = found.get('Product', df.columns[0])
-        p_stats = df.groupby(prod_key).agg({'_rev':'sum', '_prof':'sum'})
+        # Product/Margin Analysis (Fixed: Ensuring key is never None)
+        prod_key = found['Product'] if found['Product'] else df.columns[0]
+        p_stats = df.groupby(by=prod_key).agg({'_rev':'sum', '_prof':'sum'})
         p_stats['m'] = (p_stats['_prof']/p_stats['_rev']*100).replace([np.inf, -np.inf], 0).fillna(0)
 
+        # Trend Data (Robust Grouping)
         trend_dict = {}
         if found['Date']:
             df['_dt'] = pd.to_datetime(df[found['Date']], dayfirst=True, errors='coerce')
@@ -74,12 +78,13 @@ def process_business_data(df_raw):
             "top_margins": [f"{n} ({m:.1f}%)" for n, m in p_stats.sort_values('m', ascending=False).head(3)['m'].items()],
             "trend_data": trend_dict
         }, df
-    except Exception as e: return {"error": f"Logic Error: {str(e)}"}, df_raw
+    except Exception as e: 
+        return {"error": f"Analysis Error: {str(e)}"}, df_raw
 
 def get_ai_response(mistral_client, m, query):
-    if not mistral_client: return "AI Offline"
-    ctx = f"Data: Rev {m['total_revenue']} SAR, Profit {m['total_profit']} SAR."
+    if not mistral_client: return "AI Consultant Offline"
+    ctx = f"Rev: {m['total_revenue']} SAR, Profit: {m['total_profit']} SAR."
     try:
         res = mistral_client.chat.complete(model="mistral-large-latest", messages=[{"role":"user", "content": f"{ctx}\nQuestion: {query}"}])
         return res.choices[0].message.content
-    except: return "Ready."
+    except: return "Intelligence online."
