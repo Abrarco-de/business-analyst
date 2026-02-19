@@ -48,26 +48,28 @@ def process_business_data(df_raw):
         
         # Distributions
         city_data = df.groupby(found['City'])['_rev'].sum().nlargest(5).to_dict() if found['City'] else {}
-        cat_data = df.groupby(found['Category'])['_rev'].sum().nlargest(5).to_dict() if found['Category'] else {}
         
         # Product Stats
         prod_key = found.get('Product', df.columns[0])
         p_stats = df.groupby(prod_key).agg({'_rev':'sum', '_prof':'sum'})
         p_stats['m'] = (p_stats['_prof']/p_stats['_rev']*100).fillna(0)
 
-        # Trend Logic
+        # Trend Logic (FIXED FOR 'BY' AND 'LEVEL' ERROR)
         trend_dict = {}
         if found['Date']:
             df['_date'] = pd.to_datetime(df[found['Date']], dayfirst=True, errors='coerce')
             if not df['_date'].isna().all():
-                temp_df = df.dropna(subset=['_date']).set_index('_date')
+                # Clean up rows with invalid dates
+                temp_df = df.dropna(subset=['_date']).copy()
                 try:
-                    monthly = temp_df['_rev'].resample('ME').sum()
+                    # Using 'on' or 'rule' depending on library version
+                    monthly = temp_df.resample('ME', on='_date')['_rev'].sum()
                 except:
-                    monthly = temp_df['_rev'].resample('M').sum()
+                    # Fallback for older pandas versions
+                    monthly = temp_df.resample('M', on='_date')['_rev'].sum()
+                
                 trend_dict = {k.strftime('%b %Y'): float(v) for k, v in monthly.items()}
 
-        # RETURN KEYS - Must match app.py
         return {
             "mapping_preview": mapping_details,
             "total_revenue": float(df['_rev'].sum()),
@@ -76,7 +78,6 @@ def process_business_data(df_raw):
             "vat_due": float(df['_rev'].sum() * 0.15),
             "units": len(df),
             "city_dist": city_data,
-            "cat_dist": cat_data,
             "bot_margins": [f"{n} ({m:.1f}%)" for n, m in p_stats.sort_values('m').head(3)['m'].items()],
             "top_margins": [f"{n} ({m:.1f}%)" for n, m in p_stats.sort_values('m', ascending=False).head(3)['m'].items()],
             "trend_data": trend_dict
@@ -90,3 +91,4 @@ def get_ai_response(mistral_client, m, query):
         res = mistral_client.chat.complete(model="mistral-large-latest", messages=[{"role":"user", "content": f"{ctx}\nQuestion: {query}"}])
         return res.choices[0].message.content
     except: return "Ready."
+
