@@ -43,36 +43,28 @@ def process_business_data(df_raw):
 
         if not found['Revenue']: return {"error": "Missing Sales Column"}, df_raw
 
+        # Core Cleaning
         df['_rev'] = clean_num(df[found['Revenue']])
         df['_prof'] = clean_num(df[found['Profit']]) if found['Profit'] else df['_rev'] * 0.20
         
-        # Distributions
-        city_data = df.groupby(found['City'])['_rev'].sum().nlargest(5).to_dict() if found['City'] else {}
+        # Distributions (Cities & Categories)
+        city_dist = df.groupby(found['City'])['_rev'].sum().nlargest(5).to_dict() if found['City'] else {}
+        cat_dist = df.groupby(found['Category'])['_rev'].sum().nlargest(5).to_dict() if found['Category'] else {}
         
-        # Product Stats
+        # Margin Analysis
         prod_key = found.get('Product', df.columns[0])
         p_stats = df.groupby(prod_key).agg({'_rev':'sum', '_prof':'sum'})
-        p_stats['m'] = (p_stats['_prof']/p_stats['_rev']*100).fillna(0)
+        p_stats['m'] = (p_stats['_prof']/p_stats['_rev']*100).replace([np.inf, -np.inf], 0).fillna(0)
 
-        # --- FIX: ROBUST TREND LOGIC ---
+        # Robust Trend (Groupby instead of Resample to avoid errors)
         trend_dict = {}
         if found['Date']:
-            # 1. Convert to datetime
             df['_dt'] = pd.to_datetime(df[found['Date']], dayfirst=True, errors='coerce')
-            
-            # 2. Drop invalid dates and set as index
             temp_df = df.dropna(subset=['_dt']).copy()
             if not temp_df.empty:
-                temp_df = temp_df.set_index('_dt')
-                # 3. Resample using a standard rule (handles the 'by/level' error)
-                try:
-                    # 'ME' is Month End in newest pandas
-                    monthly = temp_df['_rev'].resample('ME').sum()
-                except:
-                    # 'M' for older pandas
-                    monthly = temp_df['_rev'].resample('M').sum()
-                
-                trend_dict = {k.strftime('%b %Y'): float(v) for k, v in monthly.items()}
+                temp_df['Month_Year'] = temp_df['_dt'].dt.strftime('%Y-%m')
+                monthly_sum = temp_df.groupby('Month_Year')['_rev'].sum().sort_index()
+                trend_dict = {pd.to_datetime(k).strftime('%b %Y'): float(v) for k, v in monthly_sum.items()}
 
         return {
             "mapping_preview": mapping_details,
@@ -81,17 +73,18 @@ def process_business_data(df_raw):
             "margin_pct": round((df['_prof'].sum()/df['_rev'].sum()*100), 1) if df['_rev'].sum() > 0 else 0,
             "vat_due": float(df['_rev'].sum() * 0.15),
             "units": len(df),
-            "city_dist": city_data,
+            "city_dist": city_dist,
+            "cat_dist": cat_dist,
             "bot_margins": [f"{n} ({m:.1f}%)" for n, m in p_stats.sort_values('m').head(3)['m'].items()],
             "top_margins": [f"{n} ({m:.1f}%)" for n, m in p_stats.sort_values('m', ascending=False).head(3)['m'].items()],
             "trend_data": trend_dict
         }, df
-    except Exception as e: return {"error": str(e)}, df_raw
+    except Exception as e: return {"error": f"Logic Error: {str(e)}"}, df_raw
 
 def get_ai_response(mistral_client, m, query):
-    if not mistral_client: return "AI Engine Offline"
-    ctx = f"Rev: {m['total_revenue']} SAR, Profit: {m['total_profit']} SAR."
+    if not mistral_client: return "AI Offline"
+    ctx = f"Context: Rev {m['total_revenue']} SAR, Profit {m['total_profit']} SAR, Top Regions {list(m['city_dist'].keys())}."
     try:
         res = mistral_client.chat.complete(model="mistral-large-latest", messages=[{"role":"user", "content": f"{ctx}\nQuestion: {query}"}])
         return res.choices[0].message.content
-    except: return "Ready."
+    except: return "Engine ready for analysis."
