@@ -69,7 +69,9 @@ else:
     k1.metric("💰 Total Revenue", f"{m['total_revenue']:,.0f} SAR")
     k2.metric("📈 Net Profit", f"{m['total_profit']:,.0f} SAR")
     k3.metric("🎯 Profit Margin", f"{m['margin_pct']}%")
-    k4.metric("🔮 3-Month Forecast", f"{m['forecast']:,.0f} SAR")
+    # Using .get() ensures it defaults to 0 if the engine hasn't fully updated yet
+    forecast_val = m.get('forecast', 0)
+    k4.metric("🔮 3-Month Forecast", f"{forecast_val:,.0f} SAR")
 
     st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
 
@@ -137,3 +139,4 @@ else:
         st.session_state.m = None
         st.session_state.chat = []
         st.rerun()
+
