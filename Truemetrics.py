@@ -43,21 +43,18 @@ def process_business_data(df_raw):
 
         if not found['Revenue']: return {"error": "Missing Sales Column"}, df_raw
 
-        # Core Metrics
         df['_rev'] = clean_num(df[found['Revenue']])
         df['_prof'] = clean_num(df[found['Profit']]) if found['Profit'] else df['_rev'] * 0.20
         
-        # City/Market Share
         city_key = found['City'] if found['City'] else None
-        city_dist = df.groupby(by=city_key)['_rev'].sum().nlargest(5).to_dict() if city_key else {}
+        city_dist = df.groupby(by=city_key)['_rev'].sum().nlargest(6).to_dict() if city_key else {}
         
-        # Product/Margin Analysis (Fixed: Ensuring key is never None)
         prod_key = found['Product'] if found['Product'] else df.columns[0]
         p_stats = df.groupby(by=prod_key).agg({'_rev':'sum', '_prof':'sum'})
         p_stats['m'] = (p_stats['_prof']/p_stats['_rev']*100).replace([np.inf, -np.inf], 0).fillna(0)
 
-        # Trend Data (Robust Grouping)
         trend_dict = {}
+        forecast_val = 0
         if found['Date']:
             df['_dt'] = pd.to_datetime(df[found['Date']], dayfirst=True, errors='coerce')
             temp_df = df.dropna(subset=['_dt']).copy()
@@ -65,6 +62,12 @@ def process_business_data(df_raw):
                 temp_df['Month_Year'] = temp_df['_dt'].dt.strftime('%Y-%m')
                 monthly_sum = temp_df.groupby('Month_Year')['_rev'].sum().sort_index()
                 trend_dict = {pd.to_datetime(k).strftime('%b %Y'): float(v) for k, v in monthly_sum.items()}
+                
+                # Forecasting: 3-Month Moving Average
+                if len(monthly_sum) >= 3:
+                    forecast_val = monthly_sum.iloc[-3:].mean()
+                elif len(monthly_sum) > 0:
+                    forecast_val = monthly_sum.iloc[-1]
 
         return {
             "mapping_preview": mapping_details,
@@ -74,17 +77,27 @@ def process_business_data(df_raw):
             "vat_due": float(df['_rev'].sum() * 0.15),
             "units": len(df),
             "city_dist": city_dist,
-            "bot_margins": [f"{n} ({m:.1f}%)" for n, m in p_stats.sort_values('m').head(3)['m'].items()],
-            "top_margins": [f"{n} ({m:.1f}%)" for n, m in p_stats.sort_values('m', ascending=False).head(3)['m'].items()],
+            "forecast": float(forecast_val),
+            "bot_margins": [f"{n} ({m:.1f}%)" for n, m in p_stats.sort_values('m').head(4)['m'].items()],
+            "top_margins": [f"{n} ({m:.1f}%)" for n, m in p_stats.sort_values('m', ascending=False).head(4)['m'].items()],
             "trend_data": trend_dict
         }, df
-    except Exception as e: 
-        return {"error": f"Analysis Error: {str(e)}"}, df_raw
+    except Exception as e: return {"error": f"Engine Logic Error: {str(e)}"}, df_raw
 
 def get_ai_response(mistral_client, m, query):
-    if not mistral_client: return "AI Consultant Offline"
-    ctx = f"Rev: {m['total_revenue']} SAR, Profit: {m['total_profit']} SAR."
+    if not mistral_client: return "AI Engine Offline. Check Secrets."
+    ctx = f"""
+    You are an expert Data Consultant analyzing this dataset:
+    - Total Revenue: {m['total_revenue']:,.0f} SAR
+    - Net Profit: {m['total_profit']:,.0f} SAR
+    - Average Margin: {m['margin_pct']}%
+    - Next Month Forecast: {m['forecast']:,.0f} SAR
+    - Top Markets: {list(m['city_dist'].keys())}
+    - Highest Margin Products: {m['top_margins']}
+    - Lowest Margin Products: {m['bot_margins']}
+    Answer strictly based on this context. Keep it professional and insightful.
+    """
     try:
-        res = mistral_client.chat.complete(model="mistral-large-latest", messages=[{"role":"user", "content": f"{ctx}\nQuestion: {query}"}])
+        res = mistral_client.chat.complete(model="mistral-large-latest", messages=[{"role": "system", "content": ctx}, {"role": "user", "content": query}])
         return res.choices[0].message.content
-    except: return "Intelligence online."
+    except Exception as e: return f"Connection Error: {e}"
