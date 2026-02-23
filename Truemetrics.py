@@ -38,11 +38,19 @@ def process_business_data(df_raw):
         }
         
         found = {k: detect_col(df, v) for k, v in detect_map.items()}
+        
+        # Meta Info & Confidence Score Calculation
+        found_count = 0
         for k, v in found.items():
-            if v: mapping_details.append({"Logic": k, "Header": v, "Sample": str(df[v].iloc[0])})
+            if v: 
+                mapping_details.append({"AI Concept": k, "Your Column": v})
+                found_count += 1
+        
+        confidence_score = int((found_count / len(detect_map)) * 100)
 
         if not found['Revenue']: return {"error": "Missing Sales Column"}, df_raw
 
+        # Core Math
         df['_rev'] = clean_num(df[found['Revenue']])
         df['_prof'] = clean_num(df[found['Profit']]) if found['Profit'] else df['_rev'] * 0.20
         
@@ -53,6 +61,7 @@ def process_business_data(df_raw):
         p_stats = df.groupby(by=prod_key).agg({'_rev':'sum', '_prof':'sum'})
         p_stats['m'] = (p_stats['_prof']/p_stats['_rev']*100).replace([np.inf, -np.inf], 0).fillna(0)
 
+        # Trend & Forecast
         trend_dict = {}
         forecast_val = 0
         if found['Date']:
@@ -63,21 +72,18 @@ def process_business_data(df_raw):
                 monthly_sum = temp_df.groupby('Month_Year')['_rev'].sum().sort_index()
                 trend_dict = {pd.to_datetime(k).strftime('%b %Y'): float(v) for k, v in monthly_sum.items()}
                 
-                # Forecasting: 3-Month Moving Average
-                if len(monthly_sum) >= 3:
-                    forecast_val = monthly_sum.iloc[-3:].mean()
-                elif len(monthly_sum) > 0:
-                    forecast_val = monthly_sum.iloc[-1]
+                if len(monthly_sum) >= 3: forecast_val = monthly_sum.iloc[-3:].mean()
+                elif len(monthly_sum) > 0: forecast_val = monthly_sum.iloc[-1]
 
         return {
             "mapping_preview": mapping_details,
+            "confidence": confidence_score,
             "total_revenue": float(df['_rev'].sum()),
             "total_profit": float(df['_prof'].sum()),
             "margin_pct": round((df['_prof'].sum()/df['_rev'].sum()*100), 1) if df['_rev'].sum() > 0 else 0,
-            "vat_due": float(df['_rev'].sum() * 0.15),
+            "forecast": float(forecast_val),
             "units": len(df),
             "city_dist": city_dist,
-            "forecast": float(forecast_val),
             "bot_margins": [f"{n} ({m:.1f}%)" for n, m in p_stats.sort_values('m').head(4)['m'].items()],
             "top_margins": [f"{n} ({m:.1f}%)" for n, m in p_stats.sort_values('m', ascending=False).head(4)['m'].items()],
             "trend_data": trend_dict
@@ -85,19 +91,9 @@ def process_business_data(df_raw):
     except Exception as e: return {"error": f"Engine Logic Error: {str(e)}"}, df_raw
 
 def get_ai_response(mistral_client, m, query):
-    if not mistral_client: return "AI Engine Offline. Check Secrets."
-    ctx = f"""
-    You are an expert Data Consultant analyzing this dataset:
-    - Total Revenue: {m['total_revenue']:,.0f} SAR
-    - Net Profit: {m['total_profit']:,.0f} SAR
-    - Average Margin: {m['margin_pct']}%
-    - Next Month Forecast: {m['forecast']:,.0f} SAR
-    - Top Markets: {list(m['city_dist'].keys())}
-    - Highest Margin Products: {m['top_margins']}
-    - Lowest Margin Products: {m['bot_margins']}
-    Answer strictly based on this context. Keep it professional and insightful.
-    """
+    if not mistral_client: return "AI Engine Offline. Check API keys."
+    ctx = f"Data Summary: Revenue {m['total_revenue']} SAR, Margin {m['margin_pct']}%, Records {m['units']}."
     try:
         res = mistral_client.chat.complete(model="mistral-large-latest", messages=[{"role": "system", "content": ctx}, {"role": "user", "content": query}])
         return res.choices[0].message.content
-    except Exception as e: return f"Connection Error: {e}"
+    except Exception as e: return f"Error: {e}"
