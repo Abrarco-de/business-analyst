@@ -28,72 +28,87 @@ def process_business_data(df_raw):
         if df_raw is None or df_raw.empty: return {"error": "Empty File"}, None
         df = df_raw.copy()
         mapping_details = []
+        
+        # UNIVERSAL DETECTION MAP (Covers most business files)
         detect_map = {
-            'Revenue': ['sales', 'revenue', 'amount', 'total', 'price', 'income', 'المبيعات'],
+            'Revenue': ['sales', 'revenue', 'amount', 'total', 'price', 'income', 'weekly', 'المبيعات'],
             'Profit': ['profit', 'margin', 'earnings', 'net', 'gain', 'الربح'],
-            'Date': ['date', 'time', 'year', 'month', 'التاريخ'],
-            'City': ['city', 'region', 'location', 'branch', 'store', 'المدينة'],
-            'Category': ['category', 'dept', 'group', 'type', 'الفئة'],
-            'Product': ['sub category', 'product', 'item', 'description', 'المنتج']
+            'Date': ['date', 'time', 'year', 'month', 'period', 'التاريخ'],
+            'Category': ['category', 'dept', 'group', 'type', 'item', 'product', 'الفئة'],
+            'Location': ['city', 'region', 'location', 'branch', 'store', 'المدينة']
         }
         
         found = {k: detect_col(df, v) for k, v in detect_map.items()}
         
-        # Meta Info & Confidence Score Calculation
-        found_count = 0
-        for k, v in found.items():
-            if v: 
-                mapping_details.append({"AI Concept": k, "Your Column": v})
-                found_count += 1
+        # Confidence logic: Did we find the basics?
+        essential_keys = ['Revenue', 'Date']
+        found_essentials = sum(1 for k in essential_keys if found[k])
+        confidence_score = int((found_essentials / len(essential_keys)) * 100) if found['Revenue'] else 0
         
-        confidence_score = int((found_count / len(detect_map)) * 100)
+        for k, v in found.items():
+            if v: mapping_details.append({"Role": k, "Detected Header": v})
 
-        if not found['Revenue']: return {"error": "Missing Sales Column"}, df_raw
+        if not found['Revenue']:
+            return {"error": "Universal Engine Error: Could not identify a Sales or Revenue column. Please rename your main column to 'Sales'."}, df_raw
 
-        # Core Math
-        df['_rev'] = clean_num(df[found['Revenue']])
+        # MATH LOGIC
+        rev_col = found['Revenue']
+        df['_rev'] = clean_num(df[rev_col])
         df['_prof'] = clean_num(df[found['Profit']]) if found['Profit'] else df['_rev'] * 0.20
         
-        city_key = found['City'] if found['City'] else None
-        city_dist = df.groupby(by=city_key)['_rev'].sum().nlargest(6).to_dict() if city_key else {}
+        # Grouping Logic (Falls back to first column if Location isn't found)
+        loc_key = found['Location'] if found['Location'] else (found['Category'] if found['Category'] else df.columns[0])
+        loc_dist = df.groupby(by=loc_key)['_rev'].sum().nlargest(5).to_dict()
         
-        prod_key = found['Product'] if found['Product'] else df.columns[0]
-        p_stats = df.groupby(by=prod_key).agg({'_rev':'sum', '_prof':'sum'})
+        # Margin Analysis
+        p_stats = df.groupby(by=loc_key).agg({'_rev':'sum', '_prof':'sum'})
         p_stats['m'] = (p_stats['_prof']/p_stats['_rev']*100).replace([np.inf, -np.inf], 0).fillna(0)
 
-        # Trend & Forecast
+        # Time Series
         trend_dict = {}
         forecast_val = 0
         if found['Date']:
             df['_dt'] = pd.to_datetime(df[found['Date']], dayfirst=True, errors='coerce')
             temp_df = df.dropna(subset=['_dt']).copy()
             if not temp_df.empty:
+                temp_df = temp_df.sort_values('_dt')
                 temp_df['Month_Year'] = temp_df['_dt'].dt.strftime('%Y-%m')
                 monthly_sum = temp_df.groupby('Month_Year')['_rev'].sum().sort_index()
                 trend_dict = {pd.to_datetime(k).strftime('%b %Y'): float(v) for k, v in monthly_sum.items()}
-                
-                if len(monthly_sum) >= 3: forecast_val = monthly_sum.iloc[-3:].mean()
-                elif len(monthly_sum) > 0: forecast_val = monthly_sum.iloc[-1]
+                forecast_val = monthly_sum.mean() if not monthly_sum.empty else 0
 
         return {
             "mapping_preview": mapping_details,
             "confidence": confidence_score,
             "total_revenue": float(df['_rev'].sum()),
             "total_profit": float(df['_prof'].sum()),
-            "margin_pct": round((df['_prof'].sum()/df['_rev'].sum()*100), 1) if df['_rev'].sum() > 0 else 0,
+            "margin_pct": round((df['_prof'].sum()/df['_rev'].sum()*100), 1) if df['_rev'].sum() != 0 else 0,
             "forecast": float(forecast_val),
             "units": len(df),
-            "city_dist": city_dist,
+            "loc_header": loc_key,
+            "city_dist": loc_dist,
             "bot_margins": [f"{n} ({m:.1f}%)" for n, m in p_stats.sort_values('m').head(4)['m'].items()],
             "top_margins": [f"{n} ({m:.1f}%)" for n, m in p_stats.sort_values('m', ascending=False).head(4)['m'].items()],
             "trend_data": trend_dict
         }, df
-    except Exception as e: return {"error": f"Engine Logic Error: {str(e)}"}, df_raw
+    except Exception as e: return {"error": f"General Engine Error: {str(e)}"}, df_raw
 
 def get_ai_response(mistral_client, m, query):
-    if not mistral_client: return "AI Engine Offline. Check API keys."
-    ctx = f"Data Summary: Revenue {m['total_revenue']} SAR, Margin {m['margin_pct']}%, Records {m['units']}."
+    if not mistral_client: return "AI Consultant Offline."
+    
+    # The Payload is now Universal
+    payload = f"""
+    You are an AI Data Scientist. Here is the analysis of the uploaded file:
+    - Total Revenue: {m['total_revenue']:,.2f}
+    - Profitability: {m['margin_pct']}%
+    - Top Segments (based on {m['loc_header']}): {list(m['city_dist'].keys())}
+    - Trend Points: {len(m['trend_data'])} months detected.
+    - Highest Performing: {m['top_margins']}
+    - Lowest Performing: {m['bot_margins']}
+    Answer strictly using these values.
+    """
+    
     try:
-        res = mistral_client.chat.complete(model="mistral-large-latest", messages=[{"role": "system", "content": ctx}, {"role": "user", "content": query}])
+        res = mistral_client.chat.complete(model="mistral-large-latest", messages=[{"role": "system", "content": payload}, {"role": "user", "content": query}])
         return res.choices[0].message.content
-    except Exception as e: return f"Error: {e}"
+    except Exception as e: return f"AI Error: {str(e)}"
