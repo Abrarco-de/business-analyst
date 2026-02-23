@@ -65,16 +65,34 @@ else:
         st.table(pd.DataFrame(m['mapping_preview']))
 
     # --- [ INSIGHTS ] ---
+  # --- [ INSIGHTS SECTION (Top / Risk) ] ---
     c_top, c_risk = st.columns(2)
+    
+    # Safely get the location header name, default to 'Segment' if not found
+    loc_title = m.get('loc_header', 'Segment')
+    
     with c_top:
         st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
-        st.markdown(f"<h4>💎 Top Segments ({m['loc_header']})</h4>", unsafe_allow_html=True)
-        for i in m['top_margins']: st.success(i)
+        st.markdown(f"<h4>💎 Top Segments ({loc_title})</h4>", unsafe_allow_html=True)
+        
+        # Safely get the list of top margins, default to empty list if not found
+        top_list = m.get('top_margins', [])
+        if top_list:
+            for i in top_list: st.success(i)
+        else:
+            st.info("Analyzing top performers...")
         st.markdown("</div>", unsafe_allow_html=True)
+        
     with c_risk:
         st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
         st.markdown(f"<h4>⚠️ Optimization Risks</h4>", unsafe_allow_html=True)
-        for i in m['bot_margins']: st.error(i)
+        
+        # Safely get the list of bottom margins
+        bot_list = m.get('bot_margins', [])
+        if bot_list:
+            for i in bot_list: st.error(i)
+        else:
+            st.info("Scanning for risks...")
         st.markdown("</div>", unsafe_allow_html=True)
 
     # --- [ TREND CHART ] ---
@@ -99,3 +117,4 @@ else:
             st.session_state.chat.append({"role": "user", "content": p})
             st.session_state.chat.append({"role": "assistant", "content": tm.get_ai_response(m_client, m, p)})
             st.rerun()
+
