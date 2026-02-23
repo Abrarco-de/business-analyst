@@ -25,7 +25,17 @@ st.markdown(f"""
     """, unsafe_allow_html=True)
 
 # 2. INIT
-g_client, m_client = tm.configure_dual_engines(st.secrets.get("GROQ_API_KEY"), st.secrets.get("MISTRAL_API_KEY"))
+# --- [ 2. API & ENGINE INIT ] ---
+# We use .get() to avoid crashing if the secrets file is missing
+GROQ_KEY = st.secrets.get("GROQ_API_KEY", None)
+MISTRAL_KEY = st.secrets.get("MISTRAL_API_KEY", None)
+
+g_client, m_client = tm.configure_dual_engines(GROQ_KEY, MISTRAL_KEY)
+
+# Show a helpful warning if keys are missing, but don't stop the app
+if not MISTRAL_KEY:
+    st.sidebar.warning("⚠️ AI Keys missing in secrets.toml. Chatbot will be offline.")
+
 if "m" not in st.session_state: st.session_state.m = None
 if "chat" not in st.session_state: st.session_state.chat = []
 
@@ -117,4 +127,5 @@ else:
             st.session_state.chat.append({"role": "user", "content": p})
             st.session_state.chat.append({"role": "assistant", "content": tm.get_ai_response(m_client, m, p)})
             st.rerun()
+
 
