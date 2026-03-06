@@ -3,104 +3,163 @@ import pandas as pd
 import plotly.express as px
 import Truemetrics as tm
 
-# 1. UI CONFIGURATION
-st.set_page_config(page_title="TrueMetrics | Universal", page_icon="🌐", layout="wide")
-BLUE, DARK, PANEL = "#3B82F6", "#020617", "rgba(255, 255, 255, 0.03)"
+# --- [ 1. WORLD CLASS UI DESIGN ] ---
+st.set_page_config(page_title="TrueMetrics | Pro", page_icon="📈", layout="wide")
+BLUE, GOLD, DARK, PANEL = "#3B82F6", "#F59E0B", "#020617", "rgba(255, 255, 255, 0.03)"
 
 st.markdown(f"""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;700;900&family=Inter:wght@400;500&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;800&family=Inter:wght@400;500&display=swap');
     .stApp {{ background: {DARK}; color: #f8fafc; font-family: 'Inter', sans-serif; }}
-    h1, h2, h3, h4 {{ font-family: 'Outfit', sans-serif !important; margin: 0; }}
+    h1, h2, h3, h4 {{ font-family: 'Outfit', sans-serif !important; margin-bottom: 8px !important; }}
     div[data-testid="stMetric"] {{
         background: {PANEL} !important; border: 1px solid rgba(255,255,255,0.08) !important;
-        border-radius: 20px !important; padding: 20px !important;
+        border-radius: 16px !important; padding: 20px !important; box-shadow: 0 4px 15px rgba(0,0,0,0.1);
     }}
     .glass-card {{
-        background: {PANEL}; border: 1px solid rgba(255, 255, 255, 0.05);
-        border-radius: 20px; padding: 25px; margin-bottom: 20px;
+        background: {PANEL}; border: 1px solid rgba(255, 255, 255, 0.06);
+        border-radius: 20px; padding: 24px; margin-bottom: 20px;
     }}
-    .status-bar {{ padding: 8px 15px; border-radius: 50px; background: rgba(59,130,246,0.1); color: {BLUE}; font-weight: 600; font-size: 11px; display: inline-block; margin-bottom: 20px; }}
+    .premium-card {{
+        background: linear-gradient(135deg, rgba(245, 158, 11, 0.1), rgba(0,0,0,0));
+        border: 1px solid {GOLD}; border-radius: 20px; padding: 25px;
+    }}
+    .data-warning {{ background: rgba(255,255,255,0.05); padding: 15px; border-radius: 12px; color: #94a3b8; font-size: 14px; text-align: center; border: 1px dashed rgba(255,255,255,0.1); }}
     </style>
     """, unsafe_allow_html=True)
 
-# 2. SAFE API INITIALIZATION
-# This prevents the crash if secrets are missing
+# --- [ 2. SAFE API INIT ] ---
 GROQ_K = st.secrets.get("GROQ_API_KEY", None)
 MIST_K = st.secrets.get("MISTRAL_API_KEY", None)
 g_client, m_client = tm.configure_dual_engines(GROQ_K, MIST_K)
 
 if "m" not in st.session_state: st.session_state.m = None
 if "chat" not in st.session_state: st.session_state.chat = []
+if "is_paid" not in st.session_state: st.session_state.is_paid = False
 
-# --- [ HEADER SECTION ] ---
-st.markdown("<h1 style='font-size:54px;'>TrueMetrics</h1>", unsafe_allow_html=True)
-st.markdown("<div class='status-bar'>UNIVERSAL BUSINESS ENGINE ACTIVE</div>", unsafe_allow_html=True)
+# --- [ 3. SIDEBAR / SIMULATION ] ---
+with st.sidebar:
+    st.markdown("### ⚙️ System Settings")
+    user_tier = st.toggle("Simulate Premium Tier", value=st.session_state.is_paid)
+    st.session_state.is_paid = user_tier
+    st.caption("Toggle to view human-in-the-loop features.")
+    st.divider()
 
-# --- [ DATA UPLOAD / RESET ] ---
+# --- [ 4. MAIN DASHBOARD ] ---
+st.markdown("<h1 style='font-size:48px; margin-top: -20px;'>TrueMetrics</h1>", unsafe_allow_html=True)
+st.caption("Universal POS Intelligence Platform")
+
 if st.session_state.m is None:
-    up = st.file_uploader("Upload CSV or Excel file", type=["csv", "xlsx"])
+    st.markdown("<br><br>", unsafe_allow_html=True)
+    up = st.file_uploader("Upload any POS Export (CSV/XLSX)", type=["csv", "xlsx"])
     if up:
-        raw = pd.read_csv(up) if up.name.endswith('csv') else pd.read_excel(up)
-        m_data, _ = tm.process_business_data(raw)
-        if "error" in m_data: st.error(m_data["error"])
-        else:
-            st.session_state.m = m_data
-            st.rerun()
+        try:
+            raw = pd.read_csv(up) if up.name.endswith('csv') else pd.read_excel(up)
+            m_data, _ = tm.process_business_data(raw)
+            if m_data.get("error"): st.error(m_data["error"])
+            else:
+                st.session_state.m = m_data
+                st.rerun()
+        except Exception as e:
+            st.error(f"File readability error: {e}. Please ensure it is a valid table.")
 else:
     m = st.session_state.m
-    if st.sidebar.button("🗑️ Reset & New File"):
+    
+    if st.sidebar.button("🗑️ Upload New Dataset"):
         st.session_state.m = None
         st.session_state.chat = []
         st.rerun()
 
-    # --- [ KPI STRIP ] ---
+    if m.get("warning"):
+        st.warning(m["warning"])
+
+    # === KPI STRIP ===
     k1, k2, k3, k4 = st.columns(4)
-    k1.metric("💰 Total Revenue", f"{m.get('total_revenue', 0):,.2f}")
-    k2.metric("📈 Est. Profit", f"{m.get('total_profit', 0):,.2f}")
+    k1.metric("💰 Processed Revenue", f"{m.get('total_revenue', 0):,.0f}")
+    k2.metric("📈 Estimated Profit", f"{m.get('total_profit', 0):,.0f}")
     k3.metric("🎯 Margin %", f"{m.get('margin_pct', 0)}%")
-    k4.metric("🔮 Forecast", f"{m.get('forecast', 0):,.2f}")
+    
+    # Prediction Indication
+    fc = m.get('forecast', 0)
+    if fc > 0: k4.metric("🔮 30-Day Forecast", f"{fc:,.0f}")
+    else: k4.metric("🔮 30-Day Forecast", "Not sufficient data")
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # --- [ CONFIDENCE & MAPPING ] ---
-    with st.expander(f"🔍 System Confidence: {m.get('confidence', 0)}%", expanded=False):
-        st.table(pd.DataFrame(m.get('mapping_preview', [])))
+    # === HUMAN IN THE LOOP (PREMIUM UPSALE) ===
+    if st.session_state.is_paid:
+        st.markdown("<div class='premium-card'>", unsafe_allow_html=True)
+        col_text, col_btn = st.columns([3, 1])
+        with col_text:
+            st.markdown(f"<h4>🎓 Expert Strategy Call</h4>", unsafe_allow_html=True)
+            st.write("Your POS data indicates optimization opportunities. Connect with a human analyst to review these metrics.")
+        with col_btn:
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.button("📅 Book Session", type="primary", use_container_width=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+    else:
+        st.markdown("<div class='glass-card' style='border: 1px dashed rgba(255,255,255,0.2);'>", unsafe_allow_html=True)
+        col_text, col_btn = st.columns([3, 1])
+        with col_text:
+            st.markdown(f"<h4 style='color:#94a3b8;'>🔒 Unlock Human Advisory</h4>", unsafe_allow_html=True)
+            st.write("Upgrade to Premium to have a certified retail analyst review your dashboard weekly.")
+        with col_btn:
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.button("🚀 Upgrade to Premium", use_container_width=True)
+        st.markdown("</div>", unsafe_allow_html=True)
 
-    # --- [ INSIGHTS COLUMNS ] ---
+    # === INSIGHTS / INDICATIONS SECTION ===
     c_top, c_risk = st.columns(2)
+    loc_title = m.get('loc_header', 'Segment')
+    
     with c_top:
-        st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
-        st.markdown(f"<h4>💎 Top Performers ({m.get('loc_header', 'Segment')})</h4>", unsafe_allow_html=True)
-        for i in m.get('top_margins', []): st.success(i)
+        st.markdown("<div class='glass-card' style='height: 280px;'>", unsafe_allow_html=True)
+        st.markdown(f"<h4>⭐ Top Performers ({loc_title})</h4>", unsafe_allow_html=True)
+        top_list = m.get('top_margins', [])
+        if top_list:
+            for i in top_list: st.success(f"▲ {i}")
+        else:
+            st.markdown("<div class='data-warning'>Not sufficient category/location data to calculate top performers.</div>", unsafe_allow_html=True)
         st.markdown("</div>", unsafe_allow_html=True)
+        
     with c_risk:
-        st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
-        st.markdown(f"<h4>⚠️ Margin Risks</h4>", unsafe_allow_html=True)
-        for i in m.get('bot_margins', []): st.error(i)
+        st.markdown("<div class='glass-card' style='height: 280px;'>", unsafe_allow_html=True)
+        st.markdown(f"<h4>⚠️ Margin Risks ({loc_title})</h4>", unsafe_allow_html=True)
+        bot_list = m.get('bot_margins', [])
+        if bot_list:
+            for i in bot_list: st.error(f"▼ {i}")
+        else:
+            st.markdown("<div class='data-warning'>Not sufficient category/location data to identify risks.</div>", unsafe_allow_html=True)
         st.markdown("</div>", unsafe_allow_html=True)
 
-    # --- [ TREND CHART ] ---
+    # === TREND PREDICTION CHART ===
+    st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
+    st.markdown("<h4>📊 Revenue Timeline & Trajectory</h4>", unsafe_allow_html=True)
     if m.get('trend_data'):
-        st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
-        st.markdown("<h4>📊 Revenue Timeline</h4>", unsafe_allow_html=True)
         tdf = pd.DataFrame(m['trend_data'].items(), columns=['Date', 'Sales'])
         fig = px.area(tdf, x='Date', y='Sales')
-        fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font_color='white', height=300)
-        fig.update_traces(line_color=BLUE, fillcolor='rgba(59, 130, 246, 0.1)')
+        fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font_color='white', height=300, margin=dict(l=0, r=0, t=10, b=0))
+        fig.update_traces(line_color=BLUE, fillcolor='rgba(59, 130, 246, 0.1)', line_width=3)
         st.plotly_chart(fig, use_container_width=True)
-        st.markdown("</div>", unsafe_allow_html=True)
+    else:
+        st.markdown("<br><div class='data-warning'>Not sufficient date/time data found in the file to plot historical trends.</div><br>", unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
 
-    # --- [ FLOATING CHAT POPOVER ] ---
-    with st.popover("💬 Ask AI Analyst"):
-        if not m_client: 
-            st.error("Mistral API Key missing in secrets.toml")
+    # === DATA MAPPING META ===
+    with st.expander(f"🧬 Engine Mapping Confidence: {m.get('confidence', 0)}%", expanded=False):
+        st.write("How the AI interpreted your raw file:")
+        if m.get('mapping_preview'):
+            st.table(pd.DataFrame(m['mapping_preview']))
         else:
-            chat_box = st.container(height=300)
-            for msg in st.session_state.chat:
-                with chat_box.chat_message(msg["role"]): st.write(msg["content"])
-            
-            if p := st.chat_input("Ask: 'What is the highest sale?'"):
-                st.session_state.chat.append({"role": "user", "content": p})
-                st.session_state.chat.append({"role": "assistant", "content": tm.get_ai_response(m_client, m, p)})
-                st.rerun()
+            st.write("No column mapping was successful.")
+
+    # === AI CHAT POPOVER ===
+    with st.popover("💬 Ask AI Analyst"):
+        chat_box = st.container(height=300)
+        for msg in st.session_state.chat:
+            with chat_box.chat_message(msg["role"]): st.write(msg["content"])
+        
+        if p := st.chat_input("Ask a question about the dataset..."):
+            st.session_state.chat.append({"role": "user", "content": p})
+            st.session_state.chat.append({"role": "assistant", "content": tm.get_ai_response(m_client, m, p, st.session_state.is_paid)})
+            st.rerun()
