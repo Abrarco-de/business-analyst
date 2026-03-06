@@ -73,16 +73,16 @@ else:
     if m.get("warning"):
         st.warning(m["warning"])
 
-    # === KPI STRIP ===
-    k1, k2, k3, k4 = st.columns(4)
-    k1.metric("💰 Processed Revenue", f"{m.get('total_revenue', 0):,.0f}")
-    k2.metric("📈 Estimated Profit", f"{m.get('total_profit', 0):,.0f}")
-    k3.metric("🎯 Margin %", f"{m.get('margin_pct', 0)}%")
+    # === NEW KPI STRIP (Including Orders & AOV) ===
+    k1, k2, k3, k4, k5 = st.columns(5)
+    k1.metric("💰 Revenue", f"{m.get('total_revenue', 0):,.0f}")
+    k2.metric("🛍️ Orders", f"{m.get('orders', 0):,}")
+    k3.metric("🛒 Avg Order (AOV)", f"{m.get('avg_order_value', 0):,.1f}")
+    k4.metric("🎯 Margin", f"{m.get('margin_pct', 0)}%")
     
-    # Prediction Indication
     fc = m.get('forecast', 0)
-    if fc > 0: k4.metric("🔮 30-Day Forecast", f"{fc:,.0f}")
-    else: k4.metric("🔮 30-Day Forecast", "Not sufficient data")
+    if fc > 0: k5.metric("🔮 30-Day Forecast", f"{fc:,.0f}")
+    else: k5.metric("🔮 30-Day Forecast", "N/A")
 
     st.markdown("<br>", unsafe_allow_html=True)
 
@@ -155,11 +155,14 @@ else:
 
     # === AI CHAT POPOVER ===
     with st.popover("💬 Ask AI Analyst"):
-        chat_box = st.container(height=300)
-        for msg in st.session_state.chat:
-            with chat_box.chat_message(msg["role"]): st.write(msg["content"])
-        
-        if p := st.chat_input("Ask a question about the dataset..."):
-            st.session_state.chat.append({"role": "user", "content": p})
-            st.session_state.chat.append({"role": "assistant", "content": tm.get_ai_response(m_client, m, p, st.session_state.is_paid)})
-            st.rerun()
+        if not m_client: 
+            st.error("Mistral API Key missing in secrets.toml")
+        else:
+            chat_box = st.container(height=300)
+            for msg in st.session_state.chat:
+                with chat_box.chat_message(msg["role"]): st.write(msg["content"])
+            
+            if p := st.chat_input("Ask: 'Why did my AOV drop?'"):
+                st.session_state.chat.append({"role": "user", "content": p})
+                st.session_state.chat.append({"role": "assistant", "content": tm.get_ai_response(m_client, m, p, st.session_state.is_paid)})
+                st.rerun()
