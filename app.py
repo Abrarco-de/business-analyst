@@ -6,6 +6,15 @@ import Truemetrics as tm
 # --- [ 1. WORLD CLASS UI DESIGN ] ---
 st.set_page_config(page_title="TrueMetrics | Pro", page_icon="📈", layout="wide")
 BLUE, GOLD, DARK, PANEL = "#3B82F6", "#F59E0B", "#020617", "rgba(255, 255, 255, 0.03)"
+# --- [ INITIALIZE SESSION STATE ] ---
+if "is_paid" not in st.session_state:
+    st.session_state.is_paid = False  # Default to Free tier
+
+if "m" not in st.session_state:
+    st.session_state.m = None
+
+if "insight" not in st.session_state:
+    st.session_state.insight = None
 
 st.markdown(f"""
     <style>
@@ -163,5 +172,6 @@ else:
                 st.session_state.chat.append({"role": "user", "content": p})
                 st.session_state.chat.append({"role": "assistant", "content": tm.get_ai_response(m_client, m, p, st.session_state.is_paid)})
                 st.rerun()
+
 
 
