@@ -32,7 +32,7 @@ st.markdown(f"""
 # --- [ CLIENT INIT ] ---
 # Replace the old 'configure_dual_engines' block with this:
 MISTRAL_KEY = st.secrets.get("MISTRAL_API_KEY", "")
-client = tm.get_mistral_client(MISTRAL_KEY)e
+client = tm.get_mistral_client(MISTRAL_KEY)
 
 # --- [ 3. SIDEBAR / SIMULATION ] ---
 with st.sidebar:
@@ -163,4 +163,5 @@ else:
                 st.session_state.chat.append({"role": "user", "content": p})
                 st.session_state.chat.append({"role": "assistant", "content": tm.get_ai_response(m_client, m, p, st.session_state.is_paid)})
                 st.rerun()
+
 
